@@ -33,10 +33,16 @@ jobs:
         with:
           script: |
             let labels = [];
+            let issueTitle = '';
+            let issueNumber = '';
             if (context.payload.issue) {
               labels = context.payload.issue.labels.map(l => l.name);
+              issueTitle = context.payload.issue.title;
+              issueNumber = context.payload.issue.number;
             } else if (context.payload.pull_request) {
               labels = context.payload.pull_request.labels.map(l => l.name);
+              issueTitle = context.payload.pull_request.title;
+              issueNumber = context.payload.pull_request.number;
             }
 
             const devLabel = labels.find(l => l.startsWith('developer:'));
@@ -49,6 +55,8 @@ jobs:
 
             core.setOutput('branch', branch);
             core.setOutput('dev_name', devName);
+            core.setOutput('issue_title', issueTitle);
+            core.setOutput('issue_number', String(issueNumber));
             console.log(`Developer: ${devName || '(none)'}`);
             console.log(`Target branch: ${branch || 'main (default)'}`);
 
@@ -71,7 +79,16 @@ jobs:
             echo "✅ Branch $BRANCH created"
           fi
 
-      # 4. Claude Code — base_branch говорит откуда брать исходники
+      # 4. 🔔 Уведомление: Claude начал работу
+      - name: Notify — Claude started
+        if: steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+
+      # 5. Claude Code — base_branch говорит откуда брать исходники
       #    и куда нацеливать PR
       - uses: anthropics/claude-code-action@v1
         with:
@@ -81,8 +98,9 @@ jobs:
             --model claude-opus-4-5-20251101
             --max-turns 30
 
-      # 5. Находим ветку Claude, создаём PR если нет, мержим, удаляем
+      # 6. Находим ветку Claude, создаём PR если нет, мержим, удаляем
       - name: Auto-merge into dev branch
+        id: merge
         if: steps.dev.outputs.branch != ''
         uses: actions/github-script@v7
         with:
@@ -98,7 +116,7 @@ jobs:
             // Даём время на завершение всех операций action
             await new Promise(r => setTimeout(r, 10000));
 
-            // 5a. Ищем ветку Claude по паттерну
+            // 6a. Ищем ветку Claude по паттерну
             const { data: refs } = await github.rest.git.listMatchingRefs({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -110,11 +128,11 @@ jobs:
               return;
             }
 
-            const claudeRef = refs[refs.length - 1]; // последняя (самая свежая)
+            const claudeRef = refs[refs.length - 1];
             const claudeBranch = claudeRef.ref.replace('refs/heads/', '');
             console.log(`Found Claude branch: ${claudeBranch}`);
 
-            // 5b. Ищем существующий PR
+            // 6b. Ищем существующий PR
             const { data: prs } = await github.rest.pulls.list({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -124,7 +142,7 @@ jobs:
 
             let pr = prs[0];
 
-            // 5c. Если PR нет — создаём сами, нацеленный на dev-ветку
+            // 6c. Если PR нет — создаём сами, нацеленный на dev-ветку
             if (!pr) {
               console.log(`No PR found, creating one: ${claudeBranch} → ${devBranch}`);
               const { data: newPr } = await github.rest.pulls.create({
@@ -139,7 +157,6 @@ jobs:
               console.log(`✅ Created PR #${pr.number}`);
             } else {
               console.log(`Found existing PR #${pr.number}: ${pr.head.ref} → ${pr.base.ref}`);
-              // Перенаправляем на dev-ветку если нацелен на main
               if (pr.base.ref !== devBranch) {
                 await github.rest.pulls.update({
                   owner: context.repo.owner,
@@ -151,7 +168,7 @@ jobs:
               }
             }
 
-            // 5d. Мержим (с retry — GitHub может вернуть "base branch was modified")
+            // 6d. Мержим (с retry)
             let merged = false;
             for (let attempt = 1; attempt <= 5; attempt++) {
               try {
@@ -175,10 +192,13 @@ jobs:
 
             if (!merged) {
               console.log(`❌ All merge attempts failed for PR #${pr.number}`);
+              core.setOutput('merged', 'false');
               return;
             }
 
-            // 5e. Удаляем временную ветку Claude
+            core.setOutput('merged', 'true');
+
+            // 6e. Удаляем временную ветку Claude
             try {
               await github.rest.git.deleteRef({
                 owner: context.repo.owner,
@@ -189,3 +209,12 @@ jobs:
             } catch (err) {
               console.log(`⚠️ Could not delete branch: ${err.message}`);
             }
+
+      # 7. 🔔 Уведомление: пуш в dev-ветку
+      - name: Notify — merged to dev
+        if: steps.dev.outputs.branch != '' && steps.merge.outputs.merged == 'true'
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"merged\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
