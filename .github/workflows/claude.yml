@@ -151,19 +151,31 @@ jobs:
               }
             }
 
-            // 5d. Мержим
-            try {
-              await github.rest.pulls.merge({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: pr.number,
-                merge_method: 'squash',
-                commit_title: `${pr.title} (#${pr.number})`
-              });
-              console.log(`✅ Merged PR #${pr.number} into ${devBranch}`);
-            } catch (err) {
-              console.log(`❌ Merge failed: ${err.message}`);
-              return; // не удаляем ветку если мерж не удался
+            // 5d. Мержим (с retry — GitHub может вернуть "base branch was modified")
+            let merged = false;
+            for (let attempt = 1; attempt <= 5; attempt++) {
+              try {
+                await github.rest.pulls.merge({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  merge_method: 'squash',
+                  commit_title: `${pr.title} (#${pr.number})`
+                });
+                console.log(`✅ Merged PR #${pr.number} into ${devBranch} (attempt ${attempt})`);
+                merged = true;
+                break;
+              } catch (err) {
+                console.log(`⚠️ Merge attempt ${attempt}/5 failed: ${err.message}`);
+                if (attempt < 5) {
+                  await new Promise(r => setTimeout(r, 3000 * attempt));
+                }
+              }
+            }
+
+            if (!merged) {
+              console.log(`❌ All merge attempts failed for PR #${pr.number}`);
+              return;
             }
 
             // 5e. Удаляем временную ветку Claude
