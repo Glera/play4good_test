@@ -91,7 +91,7 @@ jobs:
       # ============ OPUS: попытка 1 ============
       - name: "Claude Code — Opus (attempt 1)"
         id: opus1
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@01e756b
         continue-on-error: true
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -115,7 +115,7 @@ jobs:
       - name: "Claude Code — Opus (attempt 2)"
         id: opus2
         if: steps.opus1.outcome == 'failure'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@01e756b
         continue-on-error: true
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -149,7 +149,7 @@ jobs:
       - name: "Claude Code — Sonnet (fallback)"
         id: sonnet
         if: steps.opus1.outcome == 'failure' && steps.opus2.outcome == 'failure'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@01e756b
         continue-on-error: true
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
