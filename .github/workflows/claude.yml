@@ -100,6 +100,17 @@ jobs:
             --model claude-opus-4-5-20251101
             --max-turns 30
 
+      # Чистим локальную ветку если Opus 1 упал (иначе retry не сможет создать ветку)
+      - name: Cleanup after Opus 1
+        if: steps.opus1.outcome == 'failure'
+        run: |
+          echo "Cleaning up branches after failed attempt..."
+          git checkout "${{ steps.dev.outputs.branch || 'main' }}" 2>/dev/null || git checkout main
+          for b in $(git branch --list 'claude/issue-*'); do
+            git branch -D "$b" 2>/dev/null || true
+          done
+          echo "✅ Cleanup done"
+
       # ============ OPUS: попытка 2 ============
       - name: "Claude Code — Opus (attempt 2)"
         id: opus2
@@ -112,6 +123,17 @@ jobs:
           claude_args: |
             --model claude-opus-4-5-20251101
             --max-turns 30
+
+      # Чистим перед Sonnet
+      - name: Cleanup after Opus 2
+        if: steps.opus1.outcome == 'failure' && steps.opus2.outcome == 'failure'
+        run: |
+          echo "Cleaning up branches after failed attempt..."
+          git checkout "${{ steps.dev.outputs.branch || 'main' }}" 2>/dev/null || git checkout main
+          for b in $(git branch --list 'claude/issue-*'); do
+            git branch -D "$b" 2>/dev/null || true
+          done
+          echo "✅ Cleanup done"
 
       # ============ SONNET: fallback ============
       - name: Notify — switching to Sonnet
