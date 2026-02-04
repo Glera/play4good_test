@@ -24,16 +24,59 @@ jobs:
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Определяем ветку разработчика из лейбла issue
+      - name: Detect developer branch
+        id: dev
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let labels = [];
+            if (context.payload.issue) {
+              labels = context.payload.issue.labels.map(l => l.name);
+            } else if (context.payload.pull_request) {
+              labels = context.payload.pull_request.labels.map(l => l.name);
+            }
+
+            const devLabel = labels.find(l => l.startsWith('developer:'));
+            let branch = '';
+            let devName = '';
+            if (devLabel) {
+              devName = devLabel.replace('developer:', '');
+              branch = `dev/${devName}`;
+            }
+
+            core.setOutput('branch', branch);
+            core.setOutput('dev_name', devName);
+            console.log(`Developer: ${devName || '(none)'}`);
+            console.log(`Target branch: ${branch || '(repo default)'}`);
+
+      # 2. Checkout репо (все ветки)
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 3. Создаём dev-ветку из main, если её ещё нет
+      - name: Ensure dev branch exists
+        if: steps.dev.outputs.branch != ''
+        run: |
+          BRANCH="${{ steps.dev.outputs.branch }}"
+          if git ls-remote --heads origin "$BRANCH" | grep -q .; then
+            echo "✅ Branch $BRANCH already exists"
+          else
+            echo "🌱 Creating $BRANCH from main"
+            git checkout -b "$BRANCH" origin/main
+            git push origin "$BRANCH"
+            echo "✅ Branch $BRANCH created"
+          fi
+
+      # 4. Claude Code работает от dev-ветки разработчика
+      #    PR будет нацелен на dev/X, а не на main
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Или для Max подписки:
-          # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          base_branch: ${{ steps.dev.outputs.branch }}
           claude_args: |
             --model claude-opus-4-5-20251101
             --max-turns 30
