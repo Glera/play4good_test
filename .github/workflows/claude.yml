@@ -91,9 +91,16 @@ jobs:
       # ============ OPUS: попытка 1 ============
       - name: "Claude Code — Opus (attempt 1)"
         id: opus1
-        uses: anthropics/claude-code-action@01e756b34ef7a1447e9508f674143b07d20c2631
+        uses: anthropics/claude-code-action@v1
         continue-on-error: true
         with:
+          trigger_phrase: "@@DISABLED@@"
+          prompt: |
+            Read GitHub issue #${{ github.event.issue.number }} in this repository and implement the requested changes.
+            Issue title: ${{ github.event.issue.title }}
+            Use `gh issue view ${{ github.event.issue.number }}` to read the full issue details if needed.
+            Follow CLAUDE.md if it exists in the repo root.
+            After implementing all changes, commit with a descriptive message and push to your current branch.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           base_branch: ${{ steps.dev.outputs.branch || '' }}
           claude_args: |
@@ -115,9 +122,16 @@ jobs:
       - name: "Claude Code — Opus (attempt 2)"
         id: opus2
         if: steps.opus1.outcome == 'failure'
-        uses: anthropics/claude-code-action@01e756b34ef7a1447e9508f674143b07d20c2631
+        uses: anthropics/claude-code-action@v1
         continue-on-error: true
         with:
+          trigger_phrase: "@@DISABLED@@"
+          prompt: |
+            Read GitHub issue #${{ github.event.issue.number }} in this repository and implement the requested changes.
+            Issue title: ${{ github.event.issue.title }}
+            Use `gh issue view ${{ github.event.issue.number }}` to read the full issue details if needed.
+            Follow CLAUDE.md if it exists in the repo root.
+            After implementing all changes, commit with a descriptive message and push to your current branch.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           base_branch: ${{ steps.dev.outputs.branch || '' }}
           claude_args: |
@@ -149,9 +163,16 @@ jobs:
       - name: "Claude Code — Sonnet (fallback)"
         id: sonnet
         if: steps.opus1.outcome == 'failure' && steps.opus2.outcome == 'failure'
-        uses: anthropics/claude-code-action@01e756b34ef7a1447e9508f674143b07d20c2631
+        uses: anthropics/claude-code-action@v1
         continue-on-error: true
         with:
+          trigger_phrase: "@@DISABLED@@"
+          prompt: |
+            Read GitHub issue #${{ github.event.issue.number }} in this repository and implement the requested changes.
+            Issue title: ${{ github.event.issue.title }}
+            Use `gh issue view ${{ github.event.issue.number }}` to read the full issue details if needed.
+            Follow CLAUDE.md if it exists in the repo root.
+            After implementing all changes, commit with a descriptive message and push to your current branch.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           base_branch: ${{ steps.dev.outputs.branch || '' }}
           claude_args: |
