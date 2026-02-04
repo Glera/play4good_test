@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Определяем dev-ветку из лейбла issue
+      # 1. Определяем dev-ветку из лейбла
       - name: Detect developer branch
         id: dev
         uses: actions/github-script@v7
@@ -52,7 +52,7 @@ jobs:
             console.log(`Developer: ${devName || '(none)'}`);
             console.log(`Target branch: ${branch || 'main (default)'}`);
 
-      # 2. Checkout main (нужен для создания dev-ветки если её нет)
+      # 2. Checkout
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -71,27 +71,18 @@ jobs:
             echo "✅ Branch $BRANCH created"
           fi
 
-      # 4. Переключаемся на dev-ветку — Claude работает от неё
-      - name: Switch to dev branch
-        if: steps.dev.outputs.branch != ''
-        run: |
-          BRANCH="${{ steps.dev.outputs.branch }}"
-          git checkout "$BRANCH"
-          git pull origin "$BRANCH"
-          echo "📂 Working from branch: $(git branch --show-current)"
-          echo "📝 Last commit: $(git log --oneline -1)"
-
-      # 5. Claude Code делает работу
-      #    Создаёт свою ветку от текущей (dev/X) и откроет PR
+      # 4. Claude Code — base_branch говорит откуда брать исходники
+      #    и куда нацеливать PR
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base_branch: ${{ steps.dev.outputs.branch || '' }}
           claude_args: |
             --model claude-opus-4-5-20251101
             --max-turns 30
 
-      # 6. Перенаправляем PR Claude в dev-ветку и мержим
-      - name: Merge Claude PR into dev branch
+      # 5. Находим ветку Claude, создаём PR если нет, мержим, удаляем
+      - name: Auto-merge into dev branch
         if: steps.dev.outputs.branch != ''
         uses: actions/github-script@v7
         with:
@@ -104,61 +95,85 @@ jobs:
               return;
             }
 
-            // Даём время на создание PR
-            await new Promise(r => setTimeout(r, 5000));
+            // Даём время на завершение всех операций action
+            await new Promise(r => setTimeout(r, 10000));
 
-            // Ищем PR от Claude для этого issue
-            const { data: prs } = await github.rest.pulls.list({
+            // 5a. Ищем ветку Claude по паттерну
+            const { data: refs } = await github.rest.git.listMatchingRefs({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              state: 'open',
-              sort: 'created',
-              direction: 'desc',
-              per_page: 20
+              ref: `heads/claude/issue-${issueNum}`
             });
 
-            const claudePr = prs.find(pr =>
-              pr.head.ref.includes(`issue-${issueNum}`) ||
-              pr.body?.includes(`#${issueNum}`)
-            );
-
-            if (!claudePr) {
-              console.log(`⚠️ No open PR found for issue #${issueNum}`);
+            if (refs.length === 0) {
+              console.log(`⚠️ No claude branch found for issue #${issueNum}`);
               return;
             }
 
-            console.log(`Found PR #${claudePr.number}: ${claudePr.title}`);
-            console.log(`  ${claudePr.head.ref} → ${claudePr.base.ref}`);
+            const claudeRef = refs[refs.length - 1]; // последняя (самая свежая)
+            const claudeBranch = claudeRef.ref.replace('refs/heads/', '');
+            console.log(`Found Claude branch: ${claudeBranch}`);
 
-            // Перенаправляем PR на dev-ветку если нужно
-            if (claudePr.base.ref !== devBranch) {
-              await github.rest.pulls.update({
+            // 5b. Ищем существующий PR
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${claudeBranch}`,
+              state: 'open'
+            });
+
+            let pr = prs[0];
+
+            // 5c. Если PR нет — создаём сами, нацеленный на dev-ветку
+            if (!pr) {
+              console.log(`No PR found, creating one: ${claudeBranch} → ${devBranch}`);
+              const { data: newPr } = await github.rest.pulls.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: claudePr.number,
-                base: devBranch
+                head: claudeBranch,
+                base: devBranch,
+                title: `Auto-merge: issue #${issueNum}`,
+                body: `Automatic merge of Claude's work into \`${devBranch}\`.\n\nCloses #${issueNum}`
               });
-              console.log(`✅ Retargeted → ${devBranch}`);
+              pr = newPr;
+              console.log(`✅ Created PR #${pr.number}`);
+            } else {
+              console.log(`Found existing PR #${pr.number}: ${pr.head.ref} → ${pr.base.ref}`);
+              // Перенаправляем на dev-ветку если нацелен на main
+              if (pr.base.ref !== devBranch) {
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  base: devBranch
+                });
+                console.log(`✅ Retargeted PR #${pr.number} → ${devBranch}`);
+              }
             }
 
-            // Мержим в dev-ветку
+            // 5d. Мержим
             try {
               await github.rest.pulls.merge({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: claudePr.number,
+                pull_number: pr.number,
                 merge_method: 'squash',
-                commit_title: `${claudePr.title} (#${claudePr.number})`
+                commit_title: `${pr.title} (#${pr.number})`
               });
-              console.log(`✅ Merged into ${devBranch}`);
+              console.log(`✅ Merged PR #${pr.number} into ${devBranch}`);
+            } catch (err) {
+              console.log(`❌ Merge failed: ${err.message}`);
+              return; // не удаляем ветку если мерж не удался
+            }
 
-              // Удаляем временную ветку Claude
+            // 5e. Удаляем временную ветку Claude
+            try {
               await github.rest.git.deleteRef({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                ref: `heads/${claudePr.head.ref}`
+                ref: `heads/${claudeBranch}`
               });
-              console.log(`🗑️ Deleted branch ${claudePr.head.ref}`);
+              console.log(`🗑️ Deleted branch ${claudeBranch}`);
             } catch (err) {
-              console.log(`❌ Error: ${err.message}`);
+              console.log(`⚠️ Could not delete branch: ${err.message}`);
             }
