@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Определяем ветку разработчика из лейбла issue
+      # 1. Определяем dev-ветку из лейбла issue
       - name: Detect developer branch
         id: dev
         uses: actions/github-script@v7
@@ -50,14 +50,14 @@ jobs:
             core.setOutput('branch', branch);
             core.setOutput('dev_name', devName);
             console.log(`Developer: ${devName || '(none)'}`);
-            console.log(`Target branch: ${branch || '(repo default)'}`);
+            console.log(`Target branch: ${branch || 'main (default)'}`);
 
-      # 2. Checkout репо (все ветки)
+      # 2. Checkout main (нужен для создания dev-ветки если её нет)
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 3. Создаём dev-ветку из main, если её ещё нет
+      # 3. Создаём dev-ветку из main если её ещё нет
       - name: Ensure dev branch exists
         if: steps.dev.outputs.branch != ''
         run: |
@@ -71,12 +71,94 @@ jobs:
             echo "✅ Branch $BRANCH created"
           fi
 
-      # 4. Claude Code работает от dev-ветки разработчика
-      #    PR будет нацелен на dev/X, а не на main
+      # 4. Переключаемся на dev-ветку — Claude работает от неё
+      - name: Switch to dev branch
+        if: steps.dev.outputs.branch != ''
+        run: |
+          BRANCH="${{ steps.dev.outputs.branch }}"
+          git checkout "$BRANCH"
+          git pull origin "$BRANCH"
+          echo "📂 Working from branch: $(git branch --show-current)"
+          echo "📝 Last commit: $(git log --oneline -1)"
+
+      # 5. Claude Code делает работу
+      #    Создаёт свою ветку от текущей (dev/X) и откроет PR
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          base_branch: ${{ steps.dev.outputs.branch }}
           claude_args: |
             --model claude-opus-4-5-20251101
             --max-turns 30
+
+      # 6. Перенаправляем PR Claude в dev-ветку и мержим
+      - name: Merge Claude PR into dev branch
+        if: steps.dev.outputs.branch != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const devBranch = '${{ steps.dev.outputs.branch }}';
+            const issueNum = context.payload.issue?.number;
+
+            if (!issueNum) {
+              console.log('No issue number, skipping');
+              return;
+            }
+
+            // Даём время на создание PR
+            await new Promise(r => setTimeout(r, 5000));
+
+            // Ищем PR от Claude для этого issue
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              sort: 'created',
+              direction: 'desc',
+              per_page: 20
+            });
+
+            const claudePr = prs.find(pr =>
+              pr.head.ref.includes(`issue-${issueNum}`) ||
+              pr.body?.includes(`#${issueNum}`)
+            );
+
+            if (!claudePr) {
+              console.log(`⚠️ No open PR found for issue #${issueNum}`);
+              return;
+            }
+
+            console.log(`Found PR #${claudePr.number}: ${claudePr.title}`);
+            console.log(`  ${claudePr.head.ref} → ${claudePr.base.ref}`);
+
+            // Перенаправляем PR на dev-ветку если нужно
+            if (claudePr.base.ref !== devBranch) {
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: claudePr.number,
+                base: devBranch
+              });
+              console.log(`✅ Retargeted → ${devBranch}`);
+            }
+
+            // Мержим в dev-ветку
+            try {
+              await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: claudePr.number,
+                merge_method: 'squash',
+                commit_title: `${claudePr.title} (#${claudePr.number})`
+              });
+              console.log(`✅ Merged into ${devBranch}`);
+
+              // Удаляем временную ветку Claude
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${claudePr.head.ref}`
+              });
+              console.log(`🗑️ Deleted branch ${claudePr.head.ref}`);
+            } catch (err) {
+              console.log(`❌ Error: ${err.message}`);
+            }
