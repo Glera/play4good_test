@@ -34,12 +34,29 @@ body {
     animation: pulse 1.5s ease-in-out infinite;
 }
 
+.heart-icon {
+    display: inline-block;
+    animation: colorCycle 1.5s infinite;
+}
+
 @keyframes pulse {
     0%, 100% {
         transform: scale(1);
     }
     50% {
         transform: scale(1.1);
+    }
+}
+
+@keyframes colorCycle {
+    0%, 33.32% {
+        filter: hue-rotate(0deg) saturate(1);
+    }
+    33.33%, 66.65% {
+        filter: hue-rotate(50deg) saturate(1.5);
+    }
+    66.66%, 100% {
+        filter: hue-rotate(100deg) saturate(1.5);
     }
 }
 
