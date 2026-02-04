@@ -90,7 +90,10 @@ jobs:
 
       # 5. Claude Code — base_branch говорит откуда брать исходники
       #    и куда нацеливать PR
-      - uses: anthropics/claude-code-action@v1
+      - name: Run Claude Code
+        id: claude_code
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           base_branch: ${{ steps.dev.outputs.branch || '' }}
@@ -98,10 +101,32 @@ jobs:
             --model claude-opus-4-5-20251101
             --max-turns 30
 
+      # 5b. Retry — если Claude упал, пробуем ещё раз
+      - name: Run Claude Code (retry)
+        id: claude_code_retry
+        if: steps.claude_code.outcome == 'failure'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base_branch: ${{ steps.dev.outputs.branch || '' }}
+          claude_args: |
+            --model claude-opus-4-5-20251101
+            --max-turns 30
+
+      # 5c. 🔔 Уведомление: Claude упал после всех попыток
+      - name: Notify — Claude failed
+        if: steps.claude_code.outcome == 'failure' && steps.claude_code_retry.outcome == 'failure' && steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+
       # 6. Находим ветку Claude, создаём PR если нет, мержим, удаляем
       - name: Auto-merge into dev branch
         id: merge
-        if: steps.dev.outputs.branch != ''
+        if: steps.dev.outputs.branch != '' && (steps.claude_code.outcome == 'success' || steps.claude_code_retry.outcome == 'success')
         uses: actions/github-script@v7
         with:
           script: |
