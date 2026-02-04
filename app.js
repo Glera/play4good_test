@@ -405,6 +405,12 @@ btnDrop.addEventListener('click', hardDrop);
 
 // Keyboard controls
 document.addEventListener('keydown', (e) => {
+    // Prevent scrolling for game keys
+    const gameKeys = ['ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', ' ', 'a', 'A', 'd', 'D', 's', 'S', 'w', 'W'];
+    if (gameKeys.includes(e.key)) {
+        e.preventDefault();
+    }
+
     if (!gameRunning) {
         if (e.key === 'Enter' || e.key === ' ') {
             startGame();
