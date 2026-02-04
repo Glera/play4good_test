@@ -1,0 +1,112 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background-color: var(--tg-theme-bg-color, #ffffff);
+    color: var(--tg-theme-text-color, #000000);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    padding-top: env(safe-area-inset-top, 16px);
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+
+.container {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.greeting-card {
+    background-color: var(--tg-theme-secondary-bg-color, #f5f5f5);
+    border-radius: 16px;
+    padding: 32px 24px;
+    text-align: center;
+    width: 100%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.emoji {
+    font-size: 64px;
+    margin-bottom: 16px;
+    animation: wave 1.5s ease-in-out infinite;
+}
+
+@keyframes wave {
+    0%, 100% {
+        transform: rotate(0deg);
+    }
+    25% {
+        transform: rotate(20deg);
+    }
+    75% {
+        transform: rotate(-10deg);
+    }
+}
+
+.greeting-title {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--tg-theme-text-color, #000000);
+}
+
+.greeting-text {
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--tg-theme-hint-color, #666666);
+}
+
+.greeting-text strong {
+    color: var(--tg-theme-text-color, #000000);
+    font-size: 22px;
+    display: block;
+    margin-top: 8px;
+}
+
+.decoration {
+    font-size: 32px;
+    margin-top: 20px;
+    animation: sparkle 2s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.6;
+        transform: scale(1.1);
+    }
+}
+
+@media (max-width: 320px) {
+    .greeting-card {
+        padding: 24px 16px;
+    }
+
+    .emoji {
+        font-size: 48px;
+    }
+
+    .greeting-title {
+        font-size: 24px;
+    }
+
+    .greeting-text {
+        font-size: 16px;
+    }
+
+    .greeting-text strong {
+        font-size: 18px;
+    }
+}
