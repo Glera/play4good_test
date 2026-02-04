@@ -141,7 +141,7 @@ jobs:
           cat /tmp/claude-prompt.txt
 
       # ============================================================
-      # OPUS: основной запуск (50 тёрнов)
+      # OPUS: основной запуск (DEBUG: 5 тёрнов для диагностики)
       # ============================================================
       - name: "Claude Code — Opus"
         id: opus1
@@ -151,18 +151,40 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
-          echo "🧠 Running Claude Code (Opus)..."
+
+          echo "===== PROMPT ====="
+          cat /tmp/claude-prompt.txt
+          echo "===== END PROMPT ====="
+
+          echo "===== GIT STATUS ====="
+          git remote -v
+          git branch --show-current
+          git log --oneline -3
+          echo "===== END GIT ====="
+
+          echo "🧠 Running Claude Code (Opus, DEBUG: 5 turns)..."
           claude -p \
             --model claude-opus-4-5-20251101 \
-            --max-turns 50 \
+            --max-turns 5 \
+            --output-format stream-json \
             --verbose \
-            "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
+            "$(cat /tmp/claude-prompt.txt)" > /tmp/claude-output.txt 2>&1
+          EXIT_CODE=$?
 
-          # CLI выходит с кодом 0 даже при max turns — принудительно фейлим
+          echo "===== CLAUDE EXIT CODE: $EXIT_CODE ====="
+          echo "===== CLAUDE FULL OUTPUT ====="
+          cat /tmp/claude-output.txt
+          echo ""
+          echo "===== END OUTPUT ====="
+
+          echo "===== GIT STATUS AFTER ====="
+          git status
+          git log --oneline -5
+          echo "===== END GIT AFTER ====="
+
           if grep -qi "Reached max turns\|max.turns" /tmp/claude-output.txt; then
             echo "OPUS_MAX_TURNS=true" >> "$GITHUB_ENV"
-            echo "⏳ Hit max turns — will continue session"
+            echo "⏳ Hit max turns"
             exit 1
           fi
           exit $EXIT_CODE
