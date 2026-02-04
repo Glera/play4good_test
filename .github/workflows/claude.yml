@@ -124,50 +124,132 @@ jobs:
 
           echo "✅ Prompt ready for issue #${ISSUE_NUM} on branch ${BRANCH}"
 
-      # ============ OPUS: попытка 1 ============
-      - name: "Claude Code — Opus (attempt 1)"
+      # ============================================================
+      # OPUS: основной запуск (50 тёрнов)
+      # ============================================================
+      - name: "Claude Code — Opus"
         id: opus1
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          echo "🧠 Running Claude Code (Opus, attempt 1)..."
+          set +e
+          echo "🧠 Running Claude Code (Opus)..."
           claude -p \
             --model claude-opus-4-5-20251101 \
-            --max-turns 30 \
+            --max-turns 50 \
             --verbose \
-            "$(cat /tmp/claude-prompt.txt)"
+            "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
 
-      - name: Reset after Opus 1
-        if: steps.opus1.outcome == 'failure'
-        run: |
-          git checkout -- . 2>/dev/null || true
-          git clean -fd 2>/dev/null || true
+          if grep -qi "max.turns\|max turns\|Reached max" /tmp/claude-output.txt; then
+            echo "OPUS_MAX_TURNS=true" >> "$GITHUB_ENV"
+            echo "⏳ Hit max turns — will continue session"
+          fi
+          exit $EXIT_CODE
 
-      # ============ OPUS: попытка 2 ============
-      - name: "Claude Code — Opus (attempt 2)"
-        id: opus2
-        if: steps.opus1.outcome == 'failure'
+      # ============================================================
+      # OPUS: продолжение если не уложился в тёрны (+30)
+      # ============================================================
+      - name: "Claude Code — Opus continue (+30 turns)"
+        id: opus_cont1
+        if: steps.opus1.outcome == 'failure' && env.OPUS_MAX_TURNS == 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          echo "🧠 Running Claude Code (Opus, attempt 2)..."
+          set +e
+          echo "🔄 Continuing Opus session (+30 turns)..."
           claude -p \
             --model claude-opus-4-5-20251101 \
+            --continue \
             --max-turns 30 \
-            --verbose \
-            "$(cat /tmp/claude-prompt.txt)"
+            --verbose 2>&1 | tee /tmp/claude-output2.txt
+          EXIT_CODE=${PIPESTATUS[0]}
 
-      - name: Reset after Opus 2
-        if: steps.opus1.outcome == 'failure' && steps.opus2.outcome == 'failure'
+          if grep -qi "max.turns\|max turns\|Reached max" /tmp/claude-output2.txt; then
+            echo "OPUS_MAX_TURNS_2=true" >> "$GITHUB_ENV"
+            echo "⏳ Still hitting max turns — one more continue"
+          fi
+          exit $EXIT_CODE
+
+      # ============================================================
+      # OPUS: ещё одно продолжение если всё ещё не хватает (+30)
+      # ============================================================
+      - name: "Claude Code — Opus continue 2 (+30 turns)"
+        id: opus_cont2
+        if: steps.opus_cont1.outcome == 'failure' && env.OPUS_MAX_TURNS_2 == 'true'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
+          echo "🔄 Continuing Opus session (final +30 turns, total 110)..."
+          claude -p \
+            --model claude-opus-4-5-20251101 \
+            --continue \
+            --max-turns 30 \
+            --verbose
+
+      # ============================================================
+      # Определяем: Opus успешен?
+      # ============================================================
+      - name: Check Opus result
+        id: opus_result
+        run: |
+          if [[ "${{ steps.opus1.outcome }}" == "success" ]] || \
+             [[ "${{ steps.opus_cont1.outcome }}" == "success" ]] || \
+             [[ "${{ steps.opus_cont2.outcome }}" == "success" ]]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ============================================================
+      # OPUS: retry (только при реальной ошибке, не max turns)
+      # ============================================================
+      - name: Reset after Opus real error
+        if: steps.opus_result.outputs.ok == 'false' && env.OPUS_MAX_TURNS != 'true'
+        run: |
+          echo "🧹 Real error — resetting for retry..."
           git checkout -- . 2>/dev/null || true
           git clean -fd 2>/dev/null || true
 
-      # ============ SONNET: fallback ============
+      - name: "Claude Code — Opus (retry after error)"
+        id: opus_retry
+        if: steps.opus_result.outputs.ok == 'false' && env.OPUS_MAX_TURNS != 'true'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          echo "🧠 Retrying Claude Code (Opus)..."
+          claude -p \
+            --model claude-opus-4-5-20251101 \
+            --max-turns 50 \
+            --verbose \
+            "$(cat /tmp/claude-prompt.txt)"
+
+      # ============================================================
+      # SONNET: fallback (если Opus не справился вообще)
+      # ============================================================
+      - name: Check if need Sonnet
+        id: need_sonnet
+        run: |
+          OPUS_OK="false"
+          if [[ "${{ steps.opus_result.outputs.ok }}" == "true" ]] || \
+             [[ "${{ steps.opus_retry.outcome }}" == "success" ]]; then
+            OPUS_OK="true"
+          fi
+          echo "opus_ok=$OPUS_OK" >> "$GITHUB_OUTPUT"
+
+      - name: Reset for Sonnet
+        if: steps.need_sonnet.outputs.opus_ok == 'false'
+        run: |
+          echo "🧹 Resetting for Sonnet fallback..."
+          git checkout -- . 2>/dev/null || true
+          git clean -fd 2>/dev/null || true
+
       - name: Notify — switching to Sonnet
-        if: steps.opus1.outcome == 'failure' && steps.opus2.outcome == 'failure' && steps.dev.outputs.branch != ''
+        if: steps.need_sonnet.outputs.opus_ok == 'false' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
@@ -176,42 +258,60 @@ jobs:
 
       - name: "Claude Code — Sonnet (fallback)"
         id: sonnet
-        if: steps.opus1.outcome == 'failure' && steps.opus2.outcome == 'failure'
+        if: steps.need_sonnet.outputs.opus_ok == 'false'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
+          set +e
           echo "🧠 Running Claude Code (Sonnet, fallback)..."
           claude -p \
             --model claude-sonnet-4-5-20250929 \
-            --max-turns 30 \
+            --max-turns 50 \
             --verbose \
-            "$(cat /tmp/claude-prompt.txt)"
+            "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-sonnet.txt
+          EXIT_CODE=${PIPESTATUS[0]}
 
-      # ============ FAIL ============
+          if grep -qi "max.turns\|max turns\|Reached max" /tmp/claude-sonnet.txt; then
+            echo "SONNET_MAX_TURNS=true" >> "$GITHUB_ENV"
+          fi
+          exit $EXIT_CODE
+
+      - name: "Claude Code — Sonnet continue (+30 turns)"
+        id: sonnet_cont
+        if: steps.sonnet.outcome == 'failure' && env.SONNET_MAX_TURNS == 'true'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          echo "🔄 Continuing Sonnet session (+30 turns)..."
+          claude -p \
+            --model claude-sonnet-4-5-20250929 \
+            --continue \
+            --max-turns 30 \
+            --verbose
+
+      # ============================================================
+      # ФИНАЛ: проверка + уведомления
+      # ============================================================
+      - name: Check final result
+        id: check
+        run: |
+          if [[ "${{ steps.need_sonnet.outputs.opus_ok }}" == "true" ]] || \
+             [[ "${{ steps.sonnet.outcome }}" == "success" ]] || \
+             [[ "${{ steps.sonnet_cont.outcome }}" == "success" ]]; then
+            echo "claude_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "claude_ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Notify — all attempts failed
-        if: |
-          steps.opus1.outcome == 'failure' &&
-          steps.opus2.outcome == 'failure' &&
-          steps.sonnet.outcome == 'failure' &&
-          steps.dev.outputs.branch != ''
+        if: steps.check.outputs.claude_ok == 'false' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
             -d "{\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
-
-      # ============ ПРОВЕРКА + УВЕДОМЛЕНИЕ ============
-      - name: Check results
-        id: check
-        run: |
-          if [[ "${{ steps.opus1.outcome }}" == "success" ]] || \
-             [[ "${{ steps.opus2.outcome }}" == "success" ]] || \
-             [[ "${{ steps.sonnet.outcome }}" == "success" ]]; then
-            echo "claude_ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "claude_ok=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Notify — changes pushed
         if: steps.dev.outputs.branch != '' && steps.check.outputs.claude_ok == 'true'
