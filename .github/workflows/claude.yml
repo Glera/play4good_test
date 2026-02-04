@@ -80,13 +80,27 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
-      # 5. Настраиваем git
+      # 5. Настраиваем git + auth для push
       - name: Configure git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "claude[bot]"
           git config user.email "claude[bot]@users.noreply.github.com"
 
-      # 6. Устанавливаем Claude Code CLI (минуя сломанный SDK)
+          # Вшиваем токен в remote URL чтобы Claude CLI мог пушить
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+          # Проверяем что push работает
+          echo "✅ Git configured with push access"
+          git remote -v
+
+      # 6. Запоминаем SHA до работы Claude
+      - name: Save initial commit SHA
+        run: |
+          echo "INITIAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      # 7. Устанавливаем Claude Code CLI
       - name: Install Claude Code CLI
         run: |
           curl -fsSL https://claude.ai/install.sh | bash
@@ -94,7 +108,7 @@ jobs:
           echo "✅ Claude Code CLI installed"
           $HOME/.local/bin/claude --version
 
-      # 7. Готовим промпт из issue
+      # 8. Готовим промпт из issue
       - name: Prepare prompt
         id: prompt
         shell: bash
@@ -103,7 +117,7 @@ jobs:
           ISSUE_TITLE=$(echo "${{ steps.dev.outputs.issue_title }}" | sed 's/"/\\"/g')
           BRANCH=$(git branch --show-current)
 
-          cat > /tmp/claude-prompt.txt << EOF
+          cat > /tmp/claude-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository checkout on branch "${BRANCH}".
 
           TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
@@ -120,9 +134,11 @@ jobs:
           - Stay on current branch (${BRANCH}), do NOT create new branches
           - Make clean, focused changes
           - Always commit and push when done
-          EOF
+          - Do NOT loop or redo work — once pushed, you are DONE
+          PROMPT_EOF
 
           echo "✅ Prompt ready for issue #${ISSUE_NUM} on branch ${BRANCH}"
+          cat /tmp/claude-prompt.txt
 
       # ============================================================
       # OPUS: основной запуск (50 тёрнов)
@@ -132,6 +148,7 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           echo "🧠 Running Claude Code (Opus)..."
@@ -142,9 +159,11 @@ jobs:
             "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
 
-          if grep -qi "max.turns\|max turns\|Reached max" /tmp/claude-output.txt; then
+          # CLI выходит с кодом 0 даже при max turns — принудительно фейлим
+          if grep -qi "Reached max turns\|max.turns" /tmp/claude-output.txt; then
             echo "OPUS_MAX_TURNS=true" >> "$GITHUB_ENV"
             echo "⏳ Hit max turns — will continue session"
+            exit 1
           fi
           exit $EXIT_CODE
 
@@ -157,6 +176,7 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           echo "🔄 Continuing Opus session (+30 turns)..."
@@ -167,14 +187,15 @@ jobs:
             --verbose 2>&1 | tee /tmp/claude-output2.txt
           EXIT_CODE=${PIPESTATUS[0]}
 
-          if grep -qi "max.turns\|max turns\|Reached max" /tmp/claude-output2.txt; then
+          if grep -qi "Reached max turns\|max.turns" /tmp/claude-output2.txt; then
             echo "OPUS_MAX_TURNS_2=true" >> "$GITHUB_ENV"
             echo "⏳ Still hitting max turns — one more continue"
+            exit 1
           fi
           exit $EXIT_CODE
 
       # ============================================================
-      # OPUS: ещё одно продолжение если всё ещё не хватает (+30)
+      # OPUS: ещё одно продолжение (+30, итого до 110)
       # ============================================================
       - name: "Claude Code — Opus continue 2 (+30 turns)"
         id: opus_cont2
@@ -182,6 +203,7 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔄 Continuing Opus session (final +30 turns, total 110)..."
           claude -p \
@@ -205,7 +227,7 @@ jobs:
           fi
 
       # ============================================================
-      # OPUS: retry (только при реальной ошибке, не max turns)
+      # OPUS: retry (только при реальной ошибке, НЕ max turns)
       # ============================================================
       - name: Reset after Opus real error
         if: steps.opus_result.outputs.ok == 'false' && env.OPUS_MAX_TURNS != 'true'
@@ -220,6 +242,7 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🧠 Retrying Claude Code (Opus)..."
           claude -p \
@@ -229,7 +252,7 @@ jobs:
             "$(cat /tmp/claude-prompt.txt)"
 
       # ============================================================
-      # SONNET: fallback (если Opus не справился вообще)
+      # SONNET: fallback (если Opus не справился)
       # ============================================================
       - name: Check if need Sonnet
         id: need_sonnet
@@ -262,6 +285,7 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           echo "🧠 Running Claude Code (Sonnet, fallback)..."
@@ -272,8 +296,9 @@ jobs:
             "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-sonnet.txt
           EXIT_CODE=${PIPESTATUS[0]}
 
-          if grep -qi "max.turns\|max turns\|Reached max" /tmp/claude-sonnet.txt; then
+          if grep -qi "Reached max turns\|max.turns" /tmp/claude-sonnet.txt; then
             echo "SONNET_MAX_TURNS=true" >> "$GITHUB_ENV"
+            exit 1
           fi
           exit $EXIT_CODE
 
@@ -283,6 +308,7 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔄 Continuing Sonnet session (+30 turns)..."
           claude -p \
@@ -292,21 +318,39 @@ jobs:
             --verbose
 
       # ============================================================
-      # ФИНАЛ: проверка + уведомления
+      # ФИНАЛ: проверяем реальный git push (не верим exit code!)
       # ============================================================
-      - name: Check final result
-        id: check
+      - name: Verify actual push
+        id: verify
         run: |
-          if [[ "${{ steps.need_sonnet.outputs.opus_ok }}" == "true" ]] || \
-             [[ "${{ steps.sonnet.outcome }}" == "success" ]] || \
-             [[ "${{ steps.sonnet_cont.outcome }}" == "success" ]]; then
-            echo "claude_ok=true" >> "$GITHUB_OUTPUT"
+          CURRENT_SHA=$(git rev-parse HEAD)
+          echo "Initial SHA: $INITIAL_SHA"
+          echo "Current SHA: $CURRENT_SHA"
+
+          # Проверяем локальные коммиты
+          if [[ "$CURRENT_SHA" != "$INITIAL_SHA" ]]; then
+            echo "✅ New local commits detected!"
+            git log --oneline "$INITIAL_SHA"..HEAD
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "claude_ok=false" >> "$GITHUB_OUTPUT"
+            # Может Claude запушил напрямую — проверяем remote
+            git fetch origin
+            BRANCH=$(git branch --show-current)
+            REMOTE_SHA=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "none")
+            if [[ "$REMOTE_SHA" != "$INITIAL_SHA" ]] && [[ "$REMOTE_SHA" != "none" ]]; then
+              echo "✅ Remote has new commits!"
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "❌ No new commits — Claude didn't push anything"
+              echo "pushed=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
+      # ============================================================
+      # УВЕДОМЛЕНИЯ (только на основе реального push!)
+      # ============================================================
       - name: Notify — all attempts failed
-        if: steps.check.outputs.claude_ok == 'false' && steps.dev.outputs.branch != ''
+        if: steps.verify.outputs.pushed == 'false' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
@@ -314,7 +358,7 @@ jobs:
             -d "{\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
       - name: Notify — changes pushed
-        if: steps.dev.outputs.branch != '' && steps.check.outputs.claude_ok == 'true'
+        if: steps.verify.outputs.pushed == 'true' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
@@ -322,7 +366,7 @@ jobs:
             -d "{\"event\":\"merged\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
       - name: Close issue
-        if: steps.check.outputs.claude_ok == 'true'
+        if: steps.verify.outputs.pushed == 'true'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
