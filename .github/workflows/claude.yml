@@ -89,7 +89,7 @@ jobs:
       # 6. Устанавливаем Claude Code CLI (минуя сломанный SDK)
       - name: Install Claude Code CLI
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash -s -- -y
+          curl -fsSL https://claude.ai/install.sh | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "✅ Claude Code CLI installed"
           $HOME/.local/bin/claude --version
