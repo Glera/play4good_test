@@ -141,7 +141,7 @@ jobs:
           cat /tmp/claude-prompt.txt
 
       # ============================================================
-      # OPUS: основной запуск (DEBUG: 5 тёрнов для диагностики)
+      # OPUS: основной запуск (50 тёрнов)
       # ============================================================
       - name: "Claude Code — Opus"
         id: opus1
@@ -151,40 +151,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
-
-          echo "===== PROMPT ====="
-          cat /tmp/claude-prompt.txt
-          echo "===== END PROMPT ====="
-
-          echo "===== GIT STATUS ====="
-          git remote -v
-          git branch --show-current
-          git log --oneline -3
-          echo "===== END GIT ====="
-
-          echo "🧠 Running Claude Code (Opus, DEBUG: 5 turns)..."
-          claude -p \
+          echo "🧠 Running Claude Code (Opus)..."
+          claude -p --dangerously-skip-permissions \
             --model claude-opus-4-5-20251101 \
-            --max-turns 5 \
-            --output-format stream-json \
+            --max-turns 50 \
             --verbose \
-            "$(cat /tmp/claude-prompt.txt)" > /tmp/claude-output.txt 2>&1
-          EXIT_CODE=$?
+            "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
 
-          echo "===== CLAUDE EXIT CODE: $EXIT_CODE ====="
-          echo "===== CLAUDE FULL OUTPUT ====="
-          cat /tmp/claude-output.txt
-          echo ""
-          echo "===== END OUTPUT ====="
-
-          echo "===== GIT STATUS AFTER ====="
-          git status
-          git log --oneline -5
-          echo "===== END GIT AFTER ====="
-
+          # CLI выходит с кодом 0 даже при max turns — принудительно фейлим
           if grep -qi "Reached max turns\|max.turns" /tmp/claude-output.txt; then
             echo "OPUS_MAX_TURNS=true" >> "$GITHUB_ENV"
-            echo "⏳ Hit max turns"
+            echo "⏳ Hit max turns — will continue session"
             exit 1
           fi
           exit $EXIT_CODE
@@ -202,7 +180,7 @@ jobs:
         run: |
           set +e
           echo "🔄 Continuing Opus session (+30 turns)..."
-          claude -p \
+          claude -p --dangerously-skip-permissions \
             --model claude-opus-4-5-20251101 \
             --continue \
             --max-turns 30 \
@@ -228,7 +206,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔄 Continuing Opus session (final +30 turns, total 110)..."
-          claude -p \
+          claude -p --dangerously-skip-permissions \
             --model claude-opus-4-5-20251101 \
             --continue \
             --max-turns 30 \
@@ -267,7 +245,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🧠 Retrying Claude Code (Opus)..."
-          claude -p \
+          claude -p --dangerously-skip-permissions \
             --model claude-opus-4-5-20251101 \
             --max-turns 50 \
             --verbose \
@@ -311,7 +289,7 @@ jobs:
         run: |
           set +e
           echo "🧠 Running Claude Code (Sonnet, fallback)..."
-          claude -p \
+          claude -p --dangerously-skip-permissions \
             --model claude-sonnet-4-5-20250929 \
             --max-turns 50 \
             --verbose \
@@ -333,7 +311,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔄 Continuing Sonnet session (+30 turns)..."
-          claude -p \
+          claude -p --dangerously-skip-permissions \
             --model claude-sonnet-4-5-20250929 \
             --continue \
             --max-turns 30 \
