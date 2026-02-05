@@ -1,1 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Я люблю Лачин</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <div class="game-header">
+            <h1 class="game-title">Я ЛЮБЛЮ ЛАЧИН</h1>
+        </div>
 
+        <div class="game-content">
+            <div class="game-board-wrapper">
+                <canvas id="game-board"></canvas>
+            </div>
+
+            <div class="game-info">
+                <div class="info-box">
+                    <span class="info-label">Счёт</span>
+                    <span id="score" class="info-value">0</span>
+                </div>
+                <div class="info-box">
+                    <span class="info-label">Уровень</span>
+                    <span id="level" class="info-value">1</span>
+                </div>
+                <div class="info-box">
+                    <span class="info-label">Линии</span>
+                    <span id="lines" class="info-value">0</span>
+                </div>
+                <div class="info-box next-piece-box">
+                    <span class="info-label">Следующая</span>
+                    <canvas id="next-piece"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="game-controls">
+            <div class="controls-row">
+                <button id="btn-rotate" class="control-btn">↻</button>
+            </div>
+            <div class="controls-row">
+                <button id="btn-left" class="control-btn">←</button>
+                <button id="btn-down" class="control-btn">↓</button>
+                <button id="btn-right" class="control-btn">→</button>
+            </div>
+            <button id="btn-drop" class="control-btn drop-btn">⬇ Бросить</button>
+        </div>
+
+        <div id="game-overlay" class="game-overlay">
+            <div class="overlay-content">
+                <h2 id="overlay-title">Я ЛЮБЛЮ ЛАЧИН</h2>
+                <p id="overlay-message">Нажмите чтобы начать</p>
+                <button id="btn-start" class="start-btn">Играть</button>
+            </div>
+        </div>
+    </div>
+    <script src="app.js" type="module"></script>
+</body>
+</html>
