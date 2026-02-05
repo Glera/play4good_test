@@ -15,8 +15,20 @@
         </div>
 
         <div class="game-content">
-            <div class="game-board-wrapper">
-                <canvas id="game-board"></canvas>
+            <div class="game-main">
+                <div class="game-board-wrapper">
+                    <canvas id="game-board"></canvas>
+                </div>
+
+                <div class="game-controls">
+                    <div class="controls-row">
+                        <button id="btn-left" class="control-btn">←</button>
+                        <button id="btn-down" class="control-btn">↓</button>
+                        <button id="btn-right" class="control-btn">→</button>
+                        <button id="btn-rotate" class="control-btn">↻</button>
+                    </div>
+                    <button id="btn-drop" class="control-btn drop-btn">⬇⬇</button>
+                </div>
             </div>
 
             <div class="game-info">
@@ -37,16 +49,6 @@
                     <canvas id="next-piece"></canvas>
                 </div>
             </div>
-        </div>
-
-        <div class="game-controls">
-            <div class="controls-row">
-                <button id="btn-left" class="control-btn">←</button>
-                <button id="btn-down" class="control-btn">↓</button>
-                <button id="btn-right" class="control-btn">→</button>
-                <button id="btn-rotate" class="control-btn">↻</button>
-            </div>
-            <button id="btn-drop" class="control-btn drop-btn">⬇⬇</button>
         </div>
 
         <div id="game-overlay" class="game-overlay">
