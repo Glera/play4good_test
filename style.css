@@ -122,19 +122,20 @@ body {
 }
 
 .control-btn {
-    width: 60px;
-    height: 60px;
+    width: 55px;
+    height: 55px;
     border: none;
     border-radius: 12px;
     background: var(--tg-theme-button-color, #00d4ff);
     color: var(--tg-theme-button-text-color, #000000);
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 700;
     cursor: pointer;
     transition: transform 0.1s, opacity 0.1s;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    flex-shrink: 0;
 }
 
 .control-btn:active {
@@ -236,9 +237,13 @@ body {
     }
 
     .control-btn {
-        width: 55px;
-        height: 55px;
-        font-size: 22px;
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+    }
+
+    .controls-row {
+        gap: 8px;
     }
 
     .game-title {
@@ -276,9 +281,13 @@ body {
     }
 
     .control-btn {
-        width: 50px;
-        height: 50px;
-        font-size: 20px;
+        width: 48px;
+        height: 48px;
+        font-size: 18px;
+    }
+
+    .controls-row {
+        gap: 6px;
     }
 
     .drop-btn {
@@ -287,7 +296,7 @@ body {
     }
 
     .game-controls {
-        margin-top: 10px;
+        margin-top: 8px;
         gap: 5px;
     }
 }
