@@ -75,6 +75,18 @@ const btnDown = document.getElementById('btn-down');
 const btnRotate = document.getElementById('btn-rotate');
 const btnDrop = document.getElementById('btn-drop');
 
+// Colorize title: wrap each non-space character in a colored span
+const TITLE_COLORS = ['clr-1','clr-2','clr-3','clr-4','clr-5','clr-6','clr-7','clr-8','clr-9'];
+function colorizeTitle(text) {
+    let colorIdx = 0;
+    return text.split('').map(ch => {
+        if (ch === ' ') return ' ';
+        const cls = TITLE_COLORS[colorIdx % TITLE_COLORS.length];
+        colorIdx++;
+        return `<span class="${cls}">${ch}</span>`;
+    }).join('');
+}
+
 // Initialize canvas sizes
 canvas.width = COLS * BLOCK_SIZE;
 canvas.height = ROWS * BLOCK_SIZE;
@@ -374,7 +386,7 @@ function endGame() {
     gameRunning = false;
     gameOver = true;
 
-    overlayTitle.textContent = 'GAME OVER';
+    overlayTitle.innerHTML = colorizeTitle('GAME OVER');
     overlayMessage.textContent = `Score: ${score}`;
     startBtn.textContent = 'Play again';
     overlay.classList.remove('hidden');
