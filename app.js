@@ -587,12 +587,8 @@ function checkGameState() {
 
     const matches = findAvailableMatches();
     if (matches.length === 0) {
-        // No moves available — game stuck
-        gameRunning = false;
-        overlayTitle.textContent = 'NO MOVES';
-        overlayMessage.textContent = `No more matches available. Score: ${score}`;
-        startBtn.textContent = 'New Game';
-        overlay.classList.remove('hidden');
+        // No moves available — auto-shuffle the board
+        shuffleTiles();
     }
 }
 
@@ -631,22 +627,79 @@ function clearHints() {
 }
 
 // Shuffle remaining tiles' faces (keep positions, reassign tile faces)
+// Animated: tiles fly out, faces reshuffle, tiles fly back in
+let shuffleInProgress = false;
+
 function shuffleTiles() {
-    if (!gameRunning) return;
+    if (!gameRunning || shuffleInProgress) return;
+    shuffleInProgress = true;
 
-    const active = tiles.filter(t => !t.removed);
-    const faces = active.map(t => ({ face: t.face, matchGroup: t.matchGroup }));
-    shuffle(faces);
+    clearHints();
+    selectedTile = null;
 
-    for (let i = 0; i < active.length; i++) {
-        active[i].face = faces[i].face;
-        active[i].matchGroup = faces[i].matchGroup;
+    const tileEls = boardEl.querySelectorAll('.mahjong-tile');
+    const boardRect = { w: boardEl.offsetWidth, h: boardEl.offsetHeight };
+
+    // Phase 1: Fly out all tiles
+    let flyOutCount = 0;
+    const totalTiles = tileEls.length;
+
+    for (let i = 0; i < tileEls.length; i++) {
+        const el = tileEls[i];
+        // Random fly-out direction
+        const side = Math.floor(Math.random() * 4);
+        let flyX, flyY;
+        if (side === 0) { flyX = -150 - Math.random() * 200; flyY = (Math.random() - 0.5) * 200; }
+        else if (side === 1) { flyX = boardRect.w + 150 + Math.random() * 200; flyY = (Math.random() - 0.5) * 200; }
+        else if (side === 2) { flyX = (Math.random() - 0.5) * 200; flyY = -150 - Math.random() * 200; }
+        else { flyX = (Math.random() - 0.5) * 200; flyY = boardRect.h + 150 + Math.random() * 200; }
+
+        // Offset from current position
+        const curX = parseFloat(el.style.left) || 0;
+        const curY = parseFloat(el.style.top) || 0;
+        el.style.setProperty('--fly-out-x', (flyX - curX) + 'px');
+        el.style.setProperty('--fly-out-y', (flyY - curY) + 'px');
+        el.style.animationDelay = (i * 3 + Math.random() * 50) + 'ms';
+        el.classList.add('fly-out');
+
+        el.addEventListener('animationend', function handler() {
+            el.removeEventListener('animationend', handler);
+            flyOutCount++;
+            if (flyOutCount === totalTiles) {
+                // Phase 2: All tiles have flown out — reshuffle and fly back in
+                doReshuffle();
+            }
+        });
     }
 
-    selectedTile = null;
-    score = Math.max(0, score - 50);
-    updateUI();
-    renderBoard();
+    // Fallback in case no tiles are on the board
+    if (totalTiles === 0) {
+        shuffleInProgress = false;
+        return;
+    }
+
+    function doReshuffle() {
+        const active = tiles.filter(t => !t.removed);
+        const faces = active.map(t => ({ face: t.face, matchGroup: t.matchGroup }));
+        shuffle(faces);
+
+        for (let i = 0; i < active.length; i++) {
+            active[i].face = faces[i].face;
+            active[i].matchGroup = faces[i].matchGroup;
+        }
+
+        score = Math.max(0, score - 50);
+        updateUI();
+        renderBoard(true); // fly-in animation
+        shuffleInProgress = false;
+
+        // After the shuffle animation settles, check if there are still no moves
+        setTimeout(() => {
+            if (gameRunning) {
+                checkGameState();
+            }
+        }, 1200);
+    }
 }
 
 // Start a new game

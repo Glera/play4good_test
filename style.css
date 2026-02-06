@@ -193,6 +193,16 @@ body {
     100% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
 }
 
+/* Shuffle: tiles fly out to random edges */
+.mahjong-tile.fly-out {
+    animation: fly-out-anim 0.5s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+@keyframes fly-out-anim {
+    0% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
+    100% { opacity: 0; transform: translate(var(--fly-out-x), var(--fly-out-y)) scale(0.4) rotate(-20deg); }
+}
+
 .mahjong-tile.matched {
     animation: tile-remove 0.35s ease forwards;
 }
