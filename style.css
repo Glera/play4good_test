@@ -172,6 +172,19 @@ body {
     cursor: default;
 }
 
+.mahjong-tile.blocked.shake {
+    animation: tile-shake 0.4s ease-in-out;
+}
+
+@keyframes tile-shake {
+    0%   { transform: translateX(0); }
+    20%  { transform: translateX(-3px) rotate(-1deg); }
+    40%  { transform: translateX(3px) rotate(1deg); }
+    60%  { transform: translateX(-2px) rotate(-0.5deg); }
+    80%  { transform: translateX(2px) rotate(0.5deg); }
+    100% { transform: translateX(0) rotate(0); }
+}
+
 .mahjong-tile.blocked .tile-face {
     background: linear-gradient(145deg, #e8e0cc 0%, #d5ccb5 50%, #c8bfa5 100%);
     color: #888;

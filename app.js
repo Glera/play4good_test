@@ -535,7 +535,21 @@ function updateTileStates() {
 // Handle tile click
 function onTileClick(tile) {
     if (!gameRunning || tile.removed) return;
-    if (!isTileFree(tile)) return;
+    if (!isTileFree(tile)) {
+        // Shake the blocked tile to indicate it can't be selected
+        const el = boardEl.querySelector(`[data-id="${tile.id}"]`);
+        if (el) {
+            el.classList.remove('shake');
+            // Force reflow so re-adding the class restarts the animation
+            void el.offsetWidth;
+            el.classList.add('shake');
+            el.addEventListener('animationend', function handler() {
+                el.removeEventListener('animationend', handler);
+                el.classList.remove('shake');
+            });
+        }
+        return;
+    }
 
     clearHints();
 
