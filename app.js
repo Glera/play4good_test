@@ -256,16 +256,49 @@ function getActiveMaxLayer() {
     return maxL;
 }
 
-// Calculate zoom scale based on remaining tiles
+// Calculate zoom scale: only zoom when remaining tiles leave enough margin
 function calculateZoomScale() {
-    const remaining = tiles.filter(t => !t.removed).length;
-    const total = tiles.length;
-    if (total === 0) return 1;
+    const activeTiles = tiles.filter(t => !t.removed);
+    if (activeTiles.length === 0) return 1;
 
-    const removedRatio = 1 - (remaining / total);
-    // Zoom in gradually: from 1.0 at start to ~1.3 when most tiles removed
-    // Use a gentle curve so it's not too jarring
-    return 1 + removedRatio * 0.35;
+    const { tileW, tileH } = calculateLayout();
+    const layerOffsetX = Math.max(2, tileW * 0.05);
+    const layerOffsetY = Math.max(2, tileH * 0.05);
+
+    // Find bounding box of remaining tiles (pixel coords within the board)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const t of activeTiles) {
+        const x = (t.c / 2) * tileW + t.layer * layerOffsetX;
+        const y = (t.r / 2) * tileH + t.layer * layerOffsetY;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x + tileW > maxX) maxX = x + tileW;
+        if (y + tileH > maxY) maxY = y + tileH;
+    }
+
+    const contentW = maxX - minX;
+    const contentH = maxY - minY;
+    if (contentW <= 0 || contentH <= 0) return 1;
+
+    // The board element is larger than the content (full grid).
+    // When we scale the board, the entire board element grows from center.
+    // We need: boardW * scale <= availW and boardH * scale <= availH
+    const boardW = parseFloat(boardEl.style.width) || 1;
+    const boardH = parseFloat(boardEl.style.height) || 1;
+
+    const boardArea = document.querySelector('.game-board-area');
+    const availW = boardArea.clientWidth - 4;
+    const availH = boardArea.clientHeight - 4;
+
+    // Maximum scale so scaled board still fits in container
+    const maxScale = Math.min(availW / boardW, availH / boardH);
+
+    // Desired scale: fit the remaining content bounding box to the available area
+    const desiredScale = Math.min(availW / contentW, availH / contentH) * 0.92;
+
+    // Clamp: never shrink below 1.0, never exceed container fit, cap at 1.5x
+    const scale = Math.min(desiredScale, maxScale, 1.5);
+    return Math.max(scale, 1);
 }
 
 // Apply zoom to the board
@@ -415,9 +448,6 @@ function updateTileStates() {
 function onTileClick(tile) {
     if (!gameRunning || tile.removed) return;
     if (!isTileFree(tile)) return;
-
-    // Stop auto-play if user manually clicks
-    if (autoPlayActive) stopAutoPlay();
 
     clearHints();
 
@@ -704,7 +734,6 @@ function shuffleTiles() {
 
 // Start a new game
 function startGame() {
-    stopAutoPlay();
     const tileSet = buildTileSet();
     shuffle(tileSet);
 
@@ -741,49 +770,25 @@ function startGame() {
     overlay.classList.add('hidden');
 }
 
-// Auto-play state
-let autoPlayInterval = null;
-let autoPlayActive = false;
+// Auto-play: remove one pair per click
 const autoPlayBtn = document.getElementById('btn-autoplay');
 
-function startAutoPlay() {
-    if (!gameRunning || autoPlayActive) return;
-    autoPlayActive = true;
-    autoPlayBtn.classList.add('active');
+function doAutoMove() {
+    if (!gameRunning) return;
     selectedTile = null;
     updateTileStates();
 
-    autoPlayInterval = setInterval(() => {
-        if (!gameRunning) { stopAutoPlay(); return; }
-        const matches = findAvailableMatches();
-        if (matches.length === 0) { stopAutoPlay(); return; }
-        const [a, b] = matches[Math.floor(Math.random() * matches.length)];
-        removePair(a, b);
-    }, 600);
-}
-
-function stopAutoPlay() {
-    autoPlayActive = false;
-    if (autoPlayInterval) {
-        clearInterval(autoPlayInterval);
-        autoPlayInterval = null;
-    }
-    if (autoPlayBtn) autoPlayBtn.classList.remove('active');
-}
-
-function toggleAutoPlay() {
-    if (autoPlayActive) {
-        stopAutoPlay();
-    } else {
-        startAutoPlay();
-    }
+    const matches = findAvailableMatches();
+    if (matches.length === 0) return;
+    const [a, b] = matches[Math.floor(Math.random() * matches.length)];
+    removePair(a, b);
 }
 
 // Event listeners
 startBtn.addEventListener('click', startGame);
 hintBtn.addEventListener('click', showHint);
 shuffleBtn.addEventListener('click', shuffleTiles);
-if (autoPlayBtn) autoPlayBtn.addEventListener('click', toggleAutoPlay);
+if (autoPlayBtn) autoPlayBtn.addEventListener('click', doAutoMove);
 
 // Prevent scrolling on touch
 document.addEventListener('touchmove', (e) => {
