@@ -326,7 +326,7 @@ function calculateLayout() {
     const gridCols = maxC + 2 + 2; // +2 for tile width, +2 for layer offsets
     const gridRows = maxR + 2 + 2;
 
-    // Calculate tile size to fit
+    // Calculate tile size to fit, then verify board fits including layer offsets
     const baseTileW = availW / gridCols * 2;
     const baseTileH = availH / gridRows * 2;
 
@@ -337,6 +337,22 @@ function calculateLayout() {
     // Clamp — allow larger tiles for bigger screens
     tileW = Math.max(24, Math.min(tileW, 64));
     tileH = tileW / 0.85;
+
+    // Verify that the total board (grid + layer offsets + padding) fits within available space.
+    // If not, scale tiles down to fit.
+    const layerOffsetX = Math.max(2, tileW * 0.05);
+    const layerOffsetY = Math.max(2, tileH * 0.05);
+    const layerCount = getActiveMaxLayer();
+    const totalBoardW = (gridCols / 2) * tileW + layerCount * layerOffsetX + 10;
+    const totalBoardH = (gridRows / 2) * tileH + layerCount * layerOffsetY + 10;
+
+    if (totalBoardW > availW || totalBoardH > availH) {
+        const scaleW = availW / totalBoardW;
+        const scaleH = availH / totalBoardH;
+        const fit = Math.min(scaleW, scaleH);
+        tileW = Math.max(24, tileW * fit);
+        tileH = tileW / 0.85;
+    }
 
     return { tileW, tileH, gridCols, gridRows };
 }
@@ -357,9 +373,10 @@ function renderBoard(animate) {
     const layerOffsetX = Math.max(2, tileW * 0.05);
     const layerOffsetY = Math.max(2, tileH * 0.05);
 
-    // Calculate board dimensions
-    const boardW = (gridCols / 2) * tileW + 4 * layerOffsetX + 10;
-    const boardH = (gridRows / 2) * tileH + 4 * layerOffsetY + 10;
+    // Calculate board dimensions using actual layer count
+    const currentLayerCount = getActiveMaxLayer();
+    const boardW = (gridCols / 2) * tileW + currentLayerCount * layerOffsetX + 10;
+    const boardH = (gridRows / 2) * tileH + currentLayerCount * layerOffsetY + 10;
     boardEl.style.width = boardW + 'px';
     boardEl.style.height = boardH + 'px';
 
