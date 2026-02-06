@@ -267,25 +267,72 @@ function calculateZoom() {
     const availH = boardArea.clientHeight - 4;
 
     // Desired scale: fit the remaining content to the available area
-    const desiredScale = Math.min(availW / contentW, availH / contentH) * 0.92;
+    // Use 0.88 safety factor to ensure tiles stay well within bounds
+    const desiredScale = Math.min(availW / contentW, availH / contentH) * 0.88;
 
     // Clamp: never shrink below 1.0, cap at 2.0x
     const scale = Math.max(Math.min(desiredScale, 2.0), 1);
 
     // Calculate translation to center the content bounding box in the container.
-    // The board is flexbox-centered, so the board center is at the container center.
-    // After scaling from board center, the content center shifts.
-    // We need to translate so the content center appears at the container center.
+    // Transform is: translate(tx, ty) scale(s) with transform-origin: center center.
+    // CSS applies right-to-left: first scale around center, then translate.
+    // A board-local point (px, py) maps to visual position relative to board's layout box:
+    //   visualX = tx + boardW/2 + (px - boardW/2) * scale
+    //   visualY = ty + boardH/2 + (py - boardH/2) * scale
+    // The board is flexbox-centered, so its layout-box left in container = (availW - boardW) / 2.
+    // Container-space position = boardLeft + visualX.
+    // We want the content center to appear at the container center.
     const contentCenterX = (minX + maxX) / 2;
     const contentCenterY = (minY + maxY) / 2;
     const boardCenterX = boardW / 2;
     const boardCenterY = boardH / 2;
 
-    // Offset from board center to content center (in board coordinates)
-    const offsetX = boardCenterX - contentCenterX;
-    const offsetY = boardCenterY - contentCenterY;
+    // Center the content: solve for tx such that content center maps to container center.
+    // containerCenter = boardLeft + tx + boardW/2 + (contentCenterX - boardW/2) * scale
+    // containerCenter = availW / 2
+    // boardLeft = (availW - boardW) / 2
+    // => (availW - boardW)/2 + tx + boardW/2 + (contentCenterX - boardW/2) * scale = availW/2
+    // => tx = availW/2 - (availW - boardW)/2 - boardW/2 - (contentCenterX - boardW/2) * scale
+    // => tx = boardW/2 - (contentCenterX - boardW/2) * scale - boardW/2
+    // => tx = -(contentCenterX - boardW/2) * scale
+    let tx = -(contentCenterX - boardCenterX) * scale;
+    let ty = -(contentCenterY - boardCenterY) * scale;
 
-    return { scale, translateX: offsetX, translateY: offsetY };
+    // Now clamp so no content edge goes outside the container.
+    // Content left edge in container space:
+    //   boardLeft + tx + boardW/2 + (minX - boardW/2) * scale >= margin
+    // Content right edge:
+    //   boardLeft + tx + boardW/2 + (maxX - boardW/2) * scale <= availW - margin
+    const boardLeft = (availW - boardW) / 2;
+    const boardTop = (availH - boardH) / 2;
+    const margin = 2;
+
+    const visLeftContent = boardLeft + tx + boardCenterX + (minX - boardCenterX) * scale;
+    const visRightContent = boardLeft + tx + boardCenterX + (maxX - boardCenterX) * scale;
+    const visTopContent = boardTop + ty + boardCenterY + (minY - boardCenterY) * scale;
+    const visBottomContent = boardTop + ty + boardCenterY + (maxY - boardCenterY) * scale;
+
+    // Clamp horizontally
+    if (visRightContent - visLeftContent <= availW - 2 * margin) {
+        // Content fits — just shift if overflowing either side
+        if (visLeftContent < margin) {
+            tx += margin - visLeftContent;
+        } else if (visRightContent > availW - margin) {
+            tx -= visRightContent - (availW - margin);
+        }
+    }
+    // If content is wider than container, centering is the best we can do (already centered)
+
+    // Clamp vertically
+    if (visBottomContent - visTopContent <= availH - 2 * margin) {
+        if (visTopContent < margin) {
+            ty += margin - visTopContent;
+        } else if (visBottomContent > availH - margin) {
+            ty -= visBottomContent - (availH - margin);
+        }
+    }
+
+    return { scale, translateX: tx, translateY: ty };
 }
 
 // Apply zoom to the board
