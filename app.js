@@ -316,7 +316,7 @@ function calculateLayout() {
 }
 
 // Render all tiles to the board
-function renderBoard() {
+function renderBoard(animate) {
     boardEl.innerHTML = '';
 
     const { tileW, tileH, gridCols, gridRows } = calculateLayout();
@@ -349,7 +349,8 @@ function renderBoard() {
             return a.c - b.c;
         });
 
-    for (const tile of sortedTiles) {
+    for (let idx = 0; idx < sortedTiles.length; idx++) {
+        const tile = sortedTiles[idx];
         const el = document.createElement('div');
         el.className = 'mahjong-tile';
         el.dataset.id = tile.id;
@@ -388,6 +389,27 @@ function renderBoard() {
         // Click handler
         el.addEventListener('click', () => onTileClick(tile));
 
+        // Board assembly animation: fly in from random edge
+        if (animate) {
+            const boardRect = { w: boardW, h: boardH };
+            // Random start from outside the board
+            const side = Math.floor(Math.random() * 4);
+            let startX, startY;
+            if (side === 0) { startX = -100 - Math.random() * 200; startY = Math.random() * boardRect.h; } // left
+            else if (side === 1) { startX = boardRect.w + 100 + Math.random() * 200; startY = Math.random() * boardRect.h; } // right
+            else if (side === 2) { startX = Math.random() * boardRect.w; startY = -100 - Math.random() * 200; } // top
+            else { startX = Math.random() * boardRect.w; startY = boardRect.h + 100 + Math.random() * 200; } // bottom
+
+            const flyInX = startX - x;
+            const flyInY = startY - y;
+            el.style.setProperty('--fly-in-x', flyInX + 'px');
+            el.style.setProperty('--fly-in-y', flyInY + 'px');
+            // Stagger: bottom layers first, then upper layers
+            const delay = (tile.layer * 150) + (idx * 3) + Math.random() * 100;
+            el.style.animationDelay = delay + 'ms';
+            el.classList.add('fly-in');
+        }
+
         boardEl.appendChild(el);
     }
 
@@ -415,6 +437,9 @@ function onTileClick(tile) {
     if (!gameRunning || tile.removed) return;
     if (!isTileFree(tile)) return;
 
+    // Stop auto-play if user manually clicks
+    if (autoPlayActive) stopAutoPlay();
+
     clearHints();
 
     if (selectedTile === null) {
@@ -440,21 +465,80 @@ function onTileClick(tile) {
     }
 }
 
-// Remove a matched pair with animation
+// Create particle burst at a given position (relative to boardEl)
+function createParticles(x, y) {
+    const particleCount = 8;
+    const colors = ['#ffe066', '#f5c842', '#d4a843', '#fff', '#ffd700', '#ff9900'];
+    for (let i = 0; i < particleCount; i++) {
+        const p = document.createElement('div');
+        p.className = 'match-particle';
+        const angle = (Math.PI * 2 * i) / particleCount + (Math.random() - 0.5) * 0.5;
+        const dist = 30 + Math.random() * 40;
+        const dx = Math.cos(angle) * dist;
+        const dy = Math.sin(angle) * dist;
+        const size = 4 + Math.random() * 5;
+        p.style.width = size + 'px';
+        p.style.height = size + 'px';
+        p.style.left = x + 'px';
+        p.style.top = y + 'px';
+        p.style.background = colors[Math.floor(Math.random() * colors.length)];
+        p.style.setProperty('--dx', dx + 'px');
+        p.style.setProperty('--dy', dy + 'px');
+        boardEl.appendChild(p);
+        p.addEventListener('animationend', () => p.remove());
+    }
+}
+
+// Remove a matched pair with fly-together animation
 function removePair(a, b) {
     a.removed = true;
     b.removed = true;
     moves++;
     score += 100;
 
-    // Animate removal
     const elA = boardEl.querySelector(`[data-id="${a.id}"]`);
     const elB = boardEl.querySelector(`[data-id="${b.id}"]`);
 
-    if (elA) elA.classList.add('matched');
-    if (elB) elB.classList.add('matched');
+    if (!elA || !elB) {
+        updateUI();
+        updateTileStates();
+        applyZoom();
+        checkGameState();
+        return;
+    }
+
+    // Get current positions
+    const ax = parseFloat(elA.style.left);
+    const ay = parseFloat(elA.style.top);
+    const bx = parseFloat(elB.style.left);
+    const by = parseFloat(elB.style.top);
+
+    // Midpoint
+    const midX = (ax + bx) / 2;
+    const midY = (ay + by) / 2;
+
+    // Calculate fly offsets for each tile
+    const flyAx = midX - ax;
+    const flyAy = midY - ay;
+    const flyBx = midX - bx;
+    const flyBy = midY - by;
+
+    elA.style.setProperty('--fly-x', flyAx + 'px');
+    elA.style.setProperty('--fly-y', flyAy + 'px');
+    elB.style.setProperty('--fly-x', flyBx + 'px');
+    elB.style.setProperty('--fly-y', flyBy + 'px');
+
+    elA.classList.add('fly-match');
+    elB.classList.add('fly-match');
 
     updateUI();
+
+    // Spawn particles at midpoint after tiles meet
+    setTimeout(() => {
+        const tileW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-w'));
+        const tileH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-h'));
+        createParticles(midX + tileW / 2, midY + tileH / 2);
+    }, 280);
 
     setTimeout(() => {
         if (elA) elA.remove();
@@ -465,7 +549,7 @@ function removePair(a, b) {
         applyZoom();
 
         checkGameState();
-    }, 350);
+    }, 450);
 }
 
 // Update UI counters
@@ -557,6 +641,7 @@ function shuffleTiles() {
 
 // Start a new game
 function startGame() {
+    stopAutoPlay();
     const tileSet = buildTileSet();
     shuffle(tileSet);
 
@@ -589,14 +674,53 @@ function startGame() {
     gameRunning = true;
 
     updateUI();
-    renderBoard();
+    renderBoard(true); // animate board assembly
     overlay.classList.add('hidden');
+}
+
+// Auto-play state
+let autoPlayInterval = null;
+let autoPlayActive = false;
+const autoPlayBtn = document.getElementById('btn-autoplay');
+
+function startAutoPlay() {
+    if (!gameRunning || autoPlayActive) return;
+    autoPlayActive = true;
+    autoPlayBtn.classList.add('active');
+    selectedTile = null;
+    updateTileStates();
+
+    autoPlayInterval = setInterval(() => {
+        if (!gameRunning) { stopAutoPlay(); return; }
+        const matches = findAvailableMatches();
+        if (matches.length === 0) { stopAutoPlay(); return; }
+        const [a, b] = matches[Math.floor(Math.random() * matches.length)];
+        removePair(a, b);
+    }, 600);
+}
+
+function stopAutoPlay() {
+    autoPlayActive = false;
+    if (autoPlayInterval) {
+        clearInterval(autoPlayInterval);
+        autoPlayInterval = null;
+    }
+    if (autoPlayBtn) autoPlayBtn.classList.remove('active');
+}
+
+function toggleAutoPlay() {
+    if (autoPlayActive) {
+        stopAutoPlay();
+    } else {
+        startAutoPlay();
+    }
 }
 
 // Event listeners
 startBtn.addEventListener('click', startGame);
 hintBtn.addEventListener('click', showHint);
 shuffleBtn.addEventListener('click', shuffleTiles);
+if (autoPlayBtn) autoPlayBtn.addEventListener('click', toggleAutoPlay);
 
 // Prevent scrolling on touch
 document.addEventListener('touchmove', (e) => {

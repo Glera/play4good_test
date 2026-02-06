@@ -196,6 +196,43 @@ body {
     box-shadow: 0 0 10px rgba(52, 199, 89, 0.5);
 }
 
+/* Fly-together match animation */
+.mahjong-tile.fly-match {
+    animation: fly-together 0.45s ease-in forwards;
+    pointer-events: none;
+}
+
+@keyframes fly-together {
+    0% { opacity: 1; transform: scale(1) translate(0, 0); }
+    60% { opacity: 1; transform: scale(0.85) translate(var(--fly-x), var(--fly-y)); }
+    100% { opacity: 0; transform: scale(0.2) translate(var(--fly-x), var(--fly-y)); }
+}
+
+/* Particle burst */
+.match-particle {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 9999;
+    animation: particle-burst 0.5s ease-out forwards;
+}
+
+@keyframes particle-burst {
+    0% { opacity: 1; transform: translate(0, 0) scale(1); }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0); }
+}
+
+/* Board assembly: tiles fly in from off-screen */
+.mahjong-tile.fly-in {
+    animation: fly-in-anim 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes fly-in-anim {
+    0% { opacity: 0; transform: translate(var(--fly-in-x), var(--fly-in-y)) scale(0.5) rotate(15deg); }
+    70% { opacity: 1; transform: translate(0, 0) scale(1.05) rotate(-2deg); }
+    100% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
+}
+
 .mahjong-tile.matched {
     animation: tile-remove 0.35s ease forwards;
 }
@@ -272,6 +309,28 @@ body {
     justify-content: center;
     padding: 0 5px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.footer-btn-label {
+    display: block;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+}
+
+/* Auto-play active state */
+.footer-btn.active .footer-btn-circle {
+    background: linear-gradient(180deg, #d4a843 0%, #b08820 100%);
+    border-color: #ffe066;
+    color: #3a2510;
+    box-shadow: 0 0 12px rgba(212, 168, 67, 0.6), 0 3px 8px rgba(0,0,0,0.4);
+}
+
+.footer-btn.active .footer-btn-label {
+    color: #d4a843;
 }
 
 /* ─── Overlay ─── */
