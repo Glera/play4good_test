@@ -176,7 +176,7 @@ jobs:
           set +e
           echo "🧠 Running Claude Code (Opus)..."
           claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-5-20251101 \
+            --model claude-opus-4-6 \
             --max-turns 50 \
             --verbose \
             "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-output.txt
@@ -207,7 +207,7 @@ jobs:
           set +e
           echo "🔄 Continuing Opus session (+30 turns)..."
           claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-5-20251101 \
+            --model claude-opus-4-6 \
             --continue \
             --max-turns 30 \
             --verbose 2>&1 | tee /tmp/claude-output2.txt
@@ -236,7 +236,7 @@ jobs:
         run: |
           echo "🔄 Continuing Opus session (final +30 turns, total 110)..."
           claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-5-20251101 \
+            --model claude-opus-4-6 \
             --continue \
             --max-turns 30 \
             --verbose
@@ -278,7 +278,7 @@ jobs:
         run: |
           echo "🧠 Retrying Claude Code (Opus)..."
           claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-5-20251101 \
+            --model claude-opus-4-6 \
             --max-turns 50 \
             --verbose \
             "$(cat /tmp/claude-prompt.txt)"
