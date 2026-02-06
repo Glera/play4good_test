@@ -688,6 +688,10 @@ function removePair(a, b) {
         }
     }
 
+    // Make both tiles appear selected (blue) before the fly animation starts
+    elA.classList.add('selected');
+    elB.classList.add('selected');
+
     // Update tile states immediately so that tiles freed by this removal
     // become available (clickable) at the start of the fly animation,
     // not after it finishes
