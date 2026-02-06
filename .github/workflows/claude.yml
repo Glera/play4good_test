@@ -160,20 +160,42 @@ jobs:
 
           WORKFLOW:
           1. Run: ./notify.sh plan "Your plan here"
-          2. Read CLAUDE.md if it exists
+          2. Read CLAUDE.md — it contains project rules and DEVLOG instructions
           3. Look at relevant source files  
           4. Implement the changes
-          5. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})" && git push origin ${BRANCH}
+          5. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
+          6. Get commit SHA: COMMIT_SHA=\$(git rev-parse HEAD)
+          7. Add entry to DEVLOG.md (at the top, after header) with: issue number, title, date, branch, commit SHA, what was done, changed files, cherry-pick command
+          8. git add DEVLOG.md && git commit --amend --no-edit
+          9. git push origin ${BRANCH}
+
+          DEVLOG ENTRY FORMAT (add to top of DEVLOG.md):
+          ## #${ISSUE_NUM} — ${ISSUE_TITLE}
+          **Дата:** $(date +%Y-%m-%d)
+          **Ветка:** ${BRANCH}
+          **Коммит:** \`<short-sha>\`
+          **Статус:** ✅ готово к переносу
+
+          ### Что сделано
+          <description>
+
+          ### Изменённые файлы
+          - \`file.js\` — what changed
+
+          ### Как перенести в main
+          git cherry-pick <full-sha>
+
+          ---
 
           COMMUNICATION (use ./notify.sh anytime):
           - ./notify.sh plan "..." — your plan (REQUIRED at start)
           - ./notify.sh progress "..." — progress update
           - ./notify.sh error "..." — if you find a problem
-          - ./notify.sh info "..." — interesting findings
 
           RULES:
           - Stay on branch ${BRANCH}, do NOT create new branches
           - Make clean, focused changes
+          - ALWAYS update DEVLOG.md before pushing
           - Once pushed, you are DONE — do not loop
           PROMPT_EOF
 
