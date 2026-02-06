@@ -58,29 +58,36 @@ function buildTileSet() {
 }
 
 // Classic Turtle layout targeting exactly 144 positions
-// Landscape-oriented (wider than tall) — uses full screen width in portrait WebView
+// Portrait-oriented (taller than wide) — fits mobile phone screens in portrait mode
 function getTurtleLayout() {
     const positions = [];
 
-    // Standard Turtle: rows go downward (r), columns go right (c)
+    // Portrait Turtle: taller than wide to fit mobile screens
     // Each tile occupies a 2×2 unit cell
+    // Grid: ~10 columns wide, ~12 rows tall
 
-    // Layer 0 — bottom (largest)
+    // Layer 0 — bottom (largest): 78 tiles
     const layer0 = [
-        // row 0: 12 tiles
-        [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
-        // row 1: 8 tiles
-        [6, 8, 10, 12, 14, 16, 18, 20],
-        // row 2: 10 tiles
-        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
-        // row 3: 12 tiles (center — widest with wing gaps)
-        [0, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 26],
-        // row 4: 10 tiles
-        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
-        // row 5: 8 tiles
-        [6, 8, 10, 12, 14, 16, 18, 20],
-        // row 6: 12 tiles
-        [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
+        // row 0: 8 tiles
+        [2, 4, 6, 8, 10, 12, 14, 16],
+        // row 1: 6 tiles
+        [4, 6, 8, 10, 12, 14],
+        // row 2: 8 tiles
+        [2, 4, 6, 8, 10, 12, 14, 16],
+        // row 3: 10 tiles (widest — center with wings)
+        [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
+        // row 4: 8 tiles
+        [2, 4, 6, 8, 10, 12, 14, 16],
+        // row 5: 6 tiles
+        [4, 6, 8, 10, 12, 14],
+        // row 6: 8 tiles
+        [2, 4, 6, 8, 10, 12, 14, 16],
+        // row 7: 10 tiles (widest — center with wings)
+        [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
+        // row 8: 8 tiles
+        [2, 4, 6, 8, 10, 12, 14, 16],
+        // row 9: 6 tiles
+        [4, 6, 8, 10, 12, 14],
     ];
 
     for (let row = 0; row < layer0.length; row++) {
@@ -89,49 +96,35 @@ function getTurtleLayout() {
         }
     }
 
-    // Layer 1 — 36 tiles (6 cols × 6 rows, centered)
-    for (let row = 0; row < 6; row++) {
-        for (const col of [7, 9, 11, 13, 15, 17]) {
-            positions.push({ layer: 1, r: (row + 0.5) * 2, c: col });
+    // Layer 1 — 40 tiles (5 cols × 8 rows, centered)
+    for (let row = 0; row < 8; row++) {
+        for (const col of [5, 7, 9, 11, 13]) {
+            positions.push({ layer: 1, r: (row + 1) * 2, c: col });
         }
     }
 
-    // Layer 2 — 16 tiles (4 cols × 4 rows, centered)
-    for (let row = 0; row < 4; row++) {
-        for (const col of [9, 11, 13, 15]) {
-            positions.push({ layer: 2, r: (row + 1) * 2, c: col + 1 });
+    // Layer 2 — 18 tiles (3 cols × 6 rows, centered)
+    for (let row = 0; row < 6; row++) {
+        for (const col of [7, 9, 11]) {
+            positions.push({ layer: 2, r: (row + 2) * 2, c: col + 1 });
         }
     }
 
     // Layer 3 — 4 tiles (2 cols × 2 rows, centered)
     for (let row = 0; row < 2; row++) {
-        for (const col of [11, 13]) {
-            positions.push({ layer: 3, r: (row + 1.5) * 2, c: col + 2 });
+        for (const col of [9, 11]) {
+            positions.push({ layer: 3, r: (row + 3.5) * 2, c: col });
         }
     }
 
-    // Extra tiles to reach 144 (base: 72 + 36 + 16 + 4 = 128, need 16 more)
+    // Extra tiles to reach 144 (base: 78 + 40 + 18 + 4 = 140, need 4 more)
     const extras = [
-        // Left wing column (c=0 and c=2)
-        { layer: 0, r: 2, c: 0 },
-        { layer: 0, r: 4, c: 0 },
-        { layer: 0, r: 8, c: 0 },
-        { layer: 0, r: 10, c: 0 },
-        { layer: 0, r: 2, c: 2 },
-        { layer: 0, r: 10, c: 2 },
-        // Right wing column (c=26 and c=24)
-        { layer: 0, r: 2, c: 26 },
-        { layer: 0, r: 4, c: 26 },
-        { layer: 0, r: 8, c: 26 },
-        { layer: 0, r: 10, c: 26 },
-        { layer: 0, r: 2, c: 24 },
-        { layer: 0, r: 10, c: 24 },
-        // Top cap tiles on layer 3
-        { layer: 3, r: 5, c: 14 },
-        { layer: 3, r: 5, c: 12 },
-        // Additional center row wing tiles
+        // Top wing tiles
         { layer: 0, r: 0, c: 0 },
-        { layer: 0, r: 12, c: 0 },
+        { layer: 0, r: 0, c: 18 },
+        // Bottom wing tiles
+        { layer: 0, r: 18, c: 0 },
+        { layer: 0, r: 18, c: 18 },
     ];
 
     for (const pos of extras) {
@@ -313,7 +306,7 @@ function calculateLayout() {
     const baseTileW = availW / gridCols * 2;
     const baseTileH = availH / gridRows * 2;
 
-    // Maintain aspect ratio ~0.78 (w:h) for landscape layout readability
+    // Maintain tile aspect ratio ~0.78 (w:h) — standard mahjong tile proportions
     const ratio = 0.78;
     let tileW = Math.min(baseTileW, baseTileH * ratio);
     let tileH = tileW / ratio;
