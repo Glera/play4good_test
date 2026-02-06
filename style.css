@@ -155,7 +155,13 @@ body {
 
 .tile-face-content {
     display: block;
-    transform: translateY(-12%) translateZ(0);
+    transform: translateY(-8%) translateZ(0);
+}
+
+/* Flowers and seasons are image-like emojis — render taller, so scale down and center */
+.tile-face-content.tile-face-image {
+    font-size: calc(var(--tile-font, 20px) * 0.78);
+    transform: translateY(-2%) translateZ(0);
 }
 
 /* Tile states */
@@ -230,8 +236,7 @@ body {
 }
 
 @keyframes fly-in-anim {
-    0% { opacity: 0; transform: translate3d(var(--fly-in-x), var(--fly-in-y), 0) scale(0.5) rotate(15deg); }
-    70% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.05) rotate(-2deg); }
+    0% { opacity: 0; transform: translate3d(var(--fly-in-x), var(--fly-in-y), 0) scale(0.6) rotate(8deg); }
     100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
 }
 

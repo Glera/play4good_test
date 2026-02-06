@@ -427,7 +427,7 @@ function renderBoard(animate) {
     lastRenderedLayout = { tileW, tileH, gridCols, gridRows };
 
     // Set CSS variables for tile size
-    const fontSize = Math.max(16, Math.floor(tileW * 0.92));
+    const fontSize = Math.max(16, Math.floor(tileW * 1.05));
     document.documentElement.style.setProperty('--tile-w', tileW + 'px');
     document.documentElement.style.setProperty('--tile-h', tileH + 'px');
     document.documentElement.style.setProperty('--tile-font', fontSize + 'px');
@@ -476,6 +476,11 @@ function renderBoard(animate) {
         face.className = 'tile-face';
         const faceContent = document.createElement('span');
         faceContent.className = 'tile-face-content';
+        // Flowers and seasons render taller — use smaller size and centered position
+        const imageEmojis = ['🌸', '🌻', '🍂', '❄️', '🌷', '🌺', '🪻', '🌼'];
+        if (imageEmojis.includes(tile.face)) {
+            faceContent.classList.add('tile-face-image');
+        }
         faceContent.textContent = tile.face;
         face.appendChild(faceContent);
         el.appendChild(face);
@@ -646,41 +651,71 @@ function removePair(a, b) {
         return;
     }
 
-    // Get current positions
+    // Get current positions (top-left corner of each tile)
     const ax = parseFloat(elA.style.left);
     const ay = parseFloat(elA.style.top);
     const bx = parseFloat(elB.style.left);
     const by = parseFloat(elB.style.top);
 
-    // Midpoint where tiles will meet
-    const midX = (ax + bx) / 2;
-    const midY = (ay + by) / 2;
+    const tileW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-w'));
+    const tileH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-h'));
 
-    // Calculate perpendicular offset for the arc curve
-    const dx = bx - ax;
-    const dy = by - ay;
+    // Centers of each tile
+    const aCx = ax + tileW / 2;
+    const aCy = ay + tileH / 2;
+    const bCx = bx + tileW / 2;
+    const bCy = by + tileH / 2;
+
+    // Direction vector from A center to B center
+    const dx = bCx - aCx;
+    const dy = bCy - aCy;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    // Arc height is proportional to distance, perpendicular to the line between tiles
-    const arcHeight = Math.max(30, dist * 0.35);
-    // Perpendicular direction (normalized)
-    const px = -dy / (dist || 1);
-    const py = dx / (dist || 1);
+    const nx = dx / (dist || 1);
+    const ny = dy / (dist || 1);
 
-    // Control points for each tile's arc (curve in opposite directions)
-    const ctrlAx = midX + px * arcHeight;
-    const ctrlAy = midY + py * arcHeight;
-    const ctrlBx = midX - px * arcHeight;
-    const ctrlBy = midY - py * arcHeight;
+    // True midpoint between tile centers
+    const midCx = (aCx + bCx) / 2;
+    const midCy = (aCy + bCy) / 2;
 
-    const duration = 450;
+    // Tiles should stop when their edges touch at the midpoint.
+    // Each tile's center stops half a tile-width away from the midpoint
+    // along the line connecting them (using the larger of tileW/tileH
+    // projected onto the movement direction for correct edge alignment).
+    const halfW = tileW / 2;
+    const halfH = tileH / 2;
+    // Half-extent along the movement direction (Minkowski-style)
+    const halfExtent = Math.abs(nx) * halfW + Math.abs(ny) * halfH;
+
+    // Final center positions: each tile stops halfExtent away from midpoint
+    const endACx = midCx - nx * halfExtent;
+    const endACy = midCy - ny * halfExtent;
+    const endBCx = midCx + nx * halfExtent;
+    const endBCy = midCy + ny * halfExtent;
+
+    // Convert back to top-left positions for animation
+    const endAx = endACx - tileW / 2;
+    const endAy = endACy - tileH / 2;
+    const endBx = endBCx - tileW / 2;
+    const endBy = endBCy - tileH / 2;
+
+    // Arc curve: perpendicular offset for aesthetic curve
+    const arcHeight = Math.max(20, dist * 0.25);
+    const px = -ny;
+    const py = nx;
+
+    // Control points for each tile's arc
+    const arcMidAx = (ax + endAx) / 2 + px * arcHeight;
+    const arcMidAy = (ay + endAy) / 2 + py * arcHeight;
+    const arcMidBx = (bx + endBx) / 2 - px * arcHeight;
+    const arcMidBy = (by + endBy) / 2 - py * arcHeight;
+
+    const duration = 400;
     let finished = 0;
 
     function onFinish() {
         finished++;
         if (finished === 2) {
-            const tileW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-w'));
-            const tileH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-h'));
-            createParticles(midX + tileW / 2, midY + tileH / 2);
+            createParticles(midCx, midCy);
             if (elA) elA.remove();
             if (elB) elB.remove();
             applyZoom();
@@ -698,8 +733,8 @@ function removePair(a, b) {
     updateTileStates();
     updateUI();
 
-    animateArc(elA, ax, ay, ctrlAx, ctrlAy, midX, midY, duration, onFinish);
-    animateArc(elB, bx, by, ctrlBx, ctrlBy, midX, midY, duration, onFinish);
+    animateArc(elA, ax, ay, arcMidAx, arcMidAy, endAx, endAy, duration, onFinish);
+    animateArc(elB, bx, by, arcMidBx, arcMidBy, endBx, endBy, duration, onFinish);
 }
 
 // Update UI counters
