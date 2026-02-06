@@ -8,35 +8,35 @@ const COLS = 10;
 const ROWS = 20;
 const BLOCK_SIZE = 24;
 
-// Tetromino shapes and colors
+// Tetromino shapes and colors (NES-style palette)
 const TETROMINOES = {
     I: {
         shape: [[1, 1, 1, 1]],
-        color: '#00f5ff'
+        color: '#00bbcc'
     },
     O: {
         shape: [[1, 1], [1, 1]],
-        color: '#ffff00'
+        color: '#cccc00'
     },
     T: {
         shape: [[0, 1, 0], [1, 1, 1]],
-        color: '#aa00ff'
+        color: '#9900cc'
     },
     S: {
         shape: [[0, 1, 1], [1, 1, 0]],
-        color: '#00ff00'
+        color: '#00aa00'
     },
     Z: {
         shape: [[1, 1, 0], [0, 1, 1]],
-        color: '#ff0000'
+        color: '#cc0000'
     },
     J: {
         shape: [[1, 0, 0], [1, 1, 1]],
-        color: '#0000ff'
+        color: '#0000cc'
     },
     L: {
         shape: [[0, 0, 1], [1, 1, 1]],
-        color: '#ff8800'
+        color: '#cc6600'
     }
 };
 
@@ -180,41 +180,47 @@ function updateUI() {
     linesEl.textContent = lines;
 }
 
-// Draw block
+// Draw block (retro 8-bit style with sharp beveled edges)
 function drawBlock(context, x, y, color, size = BLOCK_SIZE) {
+    const px = x * size;
+    const py = y * size;
+    const s = size;
+    const border = Math.max(2, Math.floor(s / 8));
+
+    // Main fill
     context.fillStyle = color;
-    context.fillRect(x * size, y * size, size - 1, size - 1);
+    context.fillRect(px, py, s, s);
 
-    // Add highlight
-    context.fillStyle = 'rgba(255, 255, 255, 0.3)';
-    context.fillRect(x * size, y * size, size - 1, 3);
-    context.fillRect(x * size, y * size, 3, size - 1);
+    // Top-left highlight (lighter)
+    context.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    context.fillRect(px, py, s, border);
+    context.fillRect(px, py, border, s);
 
-    // Add shadow
-    context.fillStyle = 'rgba(0, 0, 0, 0.3)';
-    context.fillRect(x * size + size - 4, y * size, 3, size - 1);
-    context.fillRect(x * size, y * size + size - 4, size - 1, 3);
+    // Bottom-right shadow (darker)
+    context.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    context.fillRect(px, py + s - border, s, border);
+    context.fillRect(px + s - border, py, border, s);
+
+    // Inner dark outline
+    context.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    context.fillRect(px + border, py + border, s - border * 2, s - border * 2);
+
+    // Inner bright center
+    context.fillStyle = color;
+    context.fillRect(px + border + 1, py + border + 1, s - border * 2 - 2, s - border * 2 - 2);
 }
 
 // Draw board
 function drawBoard() {
-    ctx.fillStyle = '#0a0a15';
+    ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-    ctx.lineWidth = 1;
-    for (let r = 0; r <= ROWS; r++) {
-        ctx.beginPath();
-        ctx.moveTo(0, r * BLOCK_SIZE);
-        ctx.lineTo(canvas.width, r * BLOCK_SIZE);
-        ctx.stroke();
-    }
-    for (let c = 0; c <= COLS; c++) {
-        ctx.beginPath();
-        ctx.moveTo(c * BLOCK_SIZE, 0);
-        ctx.lineTo(c * BLOCK_SIZE, canvas.height);
-        ctx.stroke();
+    // Draw subtle grid dots (retro style)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    for (let r = 1; r < ROWS; r++) {
+        for (let c = 1; c < COLS; c++) {
+            ctx.fillRect(c * BLOCK_SIZE - 1, r * BLOCK_SIZE - 1, 2, 2);
+        }
     }
 
     // Draw locked blocks
@@ -259,7 +265,7 @@ function drawPiece() {
 
 // Draw next piece preview
 function drawNextPiece() {
-    nextCtx.fillStyle = '#0a0a15';
+    nextCtx.fillStyle = '#111';
     nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
 
     if (!nextPiece) return;
