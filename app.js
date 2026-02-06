@@ -392,7 +392,10 @@ function renderBoard(animate) {
         // Tile face
         const face = document.createElement('div');
         face.className = 'tile-face';
-        face.textContent = tile.face;
+        const faceContent = document.createElement('span');
+        faceContent.className = 'tile-face-content';
+        faceContent.textContent = tile.face;
+        face.appendChild(faceContent);
         el.appendChild(face);
 
         // Mark free/blocked
