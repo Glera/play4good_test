@@ -58,104 +58,87 @@ function buildTileSet() {
 }
 
 // Classic Turtle layout targeting exactly 144 positions
-// Transposed for portrait orientation (taller than wide)
+// Landscape-oriented (wider than tall) — uses full screen width in portrait WebView
 function getTurtleLayout() {
     const positions = [];
 
-    // Original layout is ~15 cols × 7 rows (landscape)
-    // We transpose: swap r↔c so it becomes ~7 cols × 15 rows (portrait)
+    // Standard Turtle: rows go downward (r), columns go right (c)
+    // Each tile occupies a 2×2 unit cell
 
     // Layer 0 — bottom (largest)
     const layer0 = [
-        // Row 0: 12 tiles (was col positions, now row positions)
-        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],
-        // Row 1: 8 tiles
+        // row 0: 12 tiles
+        [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
+        // row 1: 8 tiles
         [6, 8, 10, 12, 14, 16, 18, 20],
-        // Row 2: 10 tiles
+        // row 2: 10 tiles
         [4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
-        // Row 3: 14 tiles (widest — center row with wings)
-        [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28],
-        // Row 4: 10 tiles
+        // row 3: 12 tiles (center — widest with wing gaps)
+        [0, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 26],
+        // row 4: 10 tiles
         [4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
-        // Row 5: 8 tiles
+        // row 5: 8 tiles
         [6, 8, 10, 12, 14, 16, 18, 20],
-        // Row 6: 12 tiles
-        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],
+        // row 6: 12 tiles
+        [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
     ];
 
     for (let row = 0; row < layer0.length; row++) {
         for (const col of layer0[row]) {
-            // Transpose: old (r, c) → new (c, r) so board is portrait
-            positions.push({ layer: 0, r: col, c: row * 2 });
+            positions.push({ layer: 0, r: row * 2, c: col });
         }
     }
 
-    // Layer 1 — 36 tiles
-    const layer1 = [
-        [8, 10, 12, 14, 16, 18],
-        [8, 10, 12, 14, 16, 18],
-        [8, 10, 12, 14, 16, 18],
-        [8, 10, 12, 14, 16, 18],
-        [8, 10, 12, 14, 16, 18],
-        [8, 10, 12, 14, 16, 18],
-    ];
-
-    for (let row = 0; row < layer1.length; row++) {
-        for (const col of layer1[row]) {
-            positions.push({ layer: 1, r: col + 1, c: (row + 0.5) * 2 });
+    // Layer 1 — 36 tiles (6 cols × 6 rows, centered)
+    for (let row = 0; row < 6; row++) {
+        for (const col of [7, 9, 11, 13, 15, 17]) {
+            positions.push({ layer: 1, r: (row + 0.5) * 2, c: col });
         }
     }
 
-    // Layer 2 — 16 tiles
-    const layer2 = [
-        [10, 12, 14, 16],
-        [10, 12, 14, 16],
-        [10, 12, 14, 16],
-        [10, 12, 14, 16],
-    ];
-
-    for (let row = 0; row < layer2.length; row++) {
-        for (const col of layer2[row]) {
-            positions.push({ layer: 2, r: col + 2, c: (row + 1) * 2 });
+    // Layer 2 — 16 tiles (4 cols × 4 rows, centered)
+    for (let row = 0; row < 4; row++) {
+        for (const col of [9, 11, 13, 15]) {
+            positions.push({ layer: 2, r: (row + 1) * 2, c: col + 1 });
         }
     }
 
-    // Layer 3 — 4 tiles
-    const layer3 = [
-        [12, 14],
-        [12, 14],
-    ];
-
-    for (let row = 0; row < layer3.length; row++) {
-        for (const col of layer3[row]) {
-            positions.push({ layer: 3, r: col + 3, c: (row + 1.5) * 2 });
+    // Layer 3 — 4 tiles (2 cols × 2 rows, centered)
+    for (let row = 0; row < 2; row++) {
+        for (const col of [11, 13]) {
+            positions.push({ layer: 3, r: (row + 1.5) * 2, c: col + 2 });
         }
     }
 
-    // Extra tiles to reach 144 total (transposed)
+    // Extra tiles to reach 144 (base: 72 + 36 + 16 + 4 = 128, need 16 more)
     const extras = [
-        { layer: 0, r: 24, c: 2 },
-        { layer: 0, r: 4, c: 2 },
-        { layer: 0, r: 24, c: 10 },
-        { layer: 0, r: 4, c: 10 },
-        { layer: 0, r: 24, c: 4 },
-        { layer: 0, r: 24, c: 8 },
-        { layer: 0, r: 2, c: 4 },
-        { layer: 0, r: 2, c: 8 },
+        // Left wing column (c=0 and c=2)
         { layer: 0, r: 2, c: 0 },
-        { layer: 0, r: 2, c: 12 },
-        { layer: 0, r: 28, c: 0 },
-        { layer: 0, r: 28, c: 12 },
-        { layer: 3, r: 16, c: 5 },
-        { layer: 3, r: 16, c: 7 },
+        { layer: 0, r: 4, c: 0 },
+        { layer: 0, r: 8, c: 0 },
+        { layer: 0, r: 10, c: 0 },
+        { layer: 0, r: 2, c: 2 },
+        { layer: 0, r: 10, c: 2 },
+        // Right wing column (c=26 and c=24)
+        { layer: 0, r: 2, c: 26 },
+        { layer: 0, r: 4, c: 26 },
+        { layer: 0, r: 8, c: 26 },
+        { layer: 0, r: 10, c: 26 },
+        { layer: 0, r: 2, c: 24 },
+        { layer: 0, r: 10, c: 24 },
+        // Top cap tiles on layer 3
+        { layer: 3, r: 5, c: 14 },
+        { layer: 3, r: 5, c: 12 },
+        // Additional center row wing tiles
+        { layer: 0, r: 0, c: 0 },
+        { layer: 0, r: 12, c: 0 },
     ];
 
     for (const pos of extras) {
         positions.push(pos);
     }
 
-    // Total: 130 + 14 = 144
-    return positions;
+    return positions; // 144 total
 }
 
 // Game state
@@ -209,19 +192,19 @@ function isTileFree(tile) {
         }
     }
 
-    // Check top/bottom neighbors on the same layer (portrait layout — tiles slide up/down)
-    let blockedTop = false;
-    let blockedBottom = false;
+    // Check left/right neighbors on the same layer (landscape layout — tiles slide left/right)
+    let blockedLeft = false;
+    let blockedRight = false;
 
     for (const t of activeTiles) {
-        if (t.layer === tile.layer && Math.abs(t.c - tile.c) < 2) {
-            const dr = t.r - tile.r;
-            if (dr >= 1.5 && dr <= 2.5) blockedBottom = true;
-            if (dr <= -1.5 && dr >= -2.5) blockedTop = true;
+        if (t.layer === tile.layer && Math.abs(t.r - tile.r) < 2) {
+            const dc = t.c - tile.c;
+            if (dc >= 1.5 && dc <= 2.5) blockedRight = true;
+            if (dc <= -1.5 && dc >= -2.5) blockedLeft = true;
         }
     }
 
-    return !blockedTop || !blockedBottom;
+    return !blockedLeft || !blockedRight;
 }
 
 // Check if two tiles match
@@ -322,21 +305,22 @@ function calculateLayout() {
         }
     }
 
-    // Each tile occupies 2 units. Add some padding for layer offset
-    const gridCols = maxC + 2 + 2; // +2 for tile width, +2 for layer offsets
-    const gridRows = maxR + 2 + 2;
+    // Each tile occupies 2 units. Add padding for tile width + layer offsets
+    const gridCols = maxC + 2 + 1; // +2 for tile width, +1 for layer offset
+    const gridRows = maxR + 2 + 1;
 
-    // Calculate tile size to fit, then verify board fits including layer offsets
+    // Calculate tile size to fit
     const baseTileW = availW / gridCols * 2;
     const baseTileH = availH / gridRows * 2;
 
-    // Maintain aspect ratio ~0.85 (w:h) — more square for better readability
-    let tileW = Math.min(baseTileW, baseTileH * 0.85);
-    let tileH = tileW / 0.85;
+    // Maintain aspect ratio ~0.78 (w:h) for landscape layout readability
+    const ratio = 0.78;
+    let tileW = Math.min(baseTileW, baseTileH * ratio);
+    let tileH = tileW / ratio;
 
     // Clamp — allow larger tiles for bigger screens
-    tileW = Math.max(24, Math.min(tileW, 64));
-    tileH = tileW / 0.85;
+    tileW = Math.max(20, Math.min(tileW, 64));
+    tileH = tileW / ratio;
 
     // Verify that the total board (grid + layer offsets + padding) fits within available space.
     // If not, scale tiles down to fit.
@@ -350,8 +334,8 @@ function calculateLayout() {
         const scaleW = availW / totalBoardW;
         const scaleH = availH / totalBoardH;
         const fit = Math.min(scaleW, scaleH);
-        tileW = Math.max(24, tileW * fit);
-        tileH = tileW / 0.85;
+        tileW = Math.max(20, tileW * fit);
+        tileH = tileW / ratio;
     }
 
     return { tileW, tileH, gridCols, gridRows };
