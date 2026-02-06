@@ -548,7 +548,8 @@ function onTileClick(tile) {
             // Force reflow so re-adding the class restarts the animation
             void el.offsetWidth;
             el.classList.add('shake');
-            el.addEventListener('animationend', function handler() {
+            el.addEventListener('animationend', function handler(e) {
+                if (e.animationName !== 'tile-shake') return;
                 el.removeEventListener('animationend', handler);
                 el.classList.remove('shake');
             });

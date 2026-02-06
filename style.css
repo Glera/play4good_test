@@ -180,6 +180,7 @@ body {
 
 .mahjong-tile.blocked.shake {
     animation: tile-shake 0.4s ease-in-out;
+    transition: none;
 }
 
 @keyframes tile-shake {
