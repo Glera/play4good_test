@@ -137,7 +137,7 @@ body {
 
 .tile-face-content {
     display: block;
-    transform: translateY(-8%);
+    transform: translateY(-12%);
 }
 
 /* Tile states */
