@@ -667,31 +667,24 @@ function removePair(a, b) {
     const bCx = bx + tileW / 2;
     const bCy = by + tileH / 2;
 
-    // Direction vector from A center to B center
+    // Distance between tile centers
     const dx = bCx - aCx;
     const dy = bCy - aCy;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const nx = dx / (dist || 1);
-    const ny = dy / (dist || 1);
 
-    // True midpoint between tile centers
-    const midCx = (aCx + bCx) / 2;
-    const midCy = (aCy + bCy) / 2;
+    // Meeting point: both tiles land on the same horizontal line (same Y).
+    // Use the average Y of both tiles as the shared horizontal line.
+    // X meeting point is the midpoint between the two tiles.
+    const meetX = (aCx + bCx) / 2;
+    const meetY = (aCy + bCy) / 2;
 
-    // Tiles should stop when their edges touch at the midpoint.
-    // Each tile's center stops half a tile-width away from the midpoint
-    // along the line connecting them (using the larger of tileW/tileH
-    // projected onto the movement direction for correct edge alignment).
+    // Final positions: tiles sit side by side on the same horizontal line,
+    // touching edge-to-edge. Tile A on the left, tile B on the right.
     const halfW = tileW / 2;
-    const halfH = tileH / 2;
-    // Half-extent along the movement direction (Minkowski-style)
-    const halfExtent = Math.abs(nx) * halfW + Math.abs(ny) * halfH;
-
-    // Final center positions: each tile stops halfExtent away from midpoint
-    const endACx = midCx - nx * halfExtent;
-    const endACy = midCy - ny * halfExtent;
-    const endBCx = midCx + nx * halfExtent;
-    const endBCy = midCy + ny * halfExtent;
+    const endACx = meetX - halfW;
+    const endACy = meetY;
+    const endBCx = meetX + halfW;
+    const endBCy = meetY;
 
     // Convert back to top-left positions for animation
     const endAx = endACx - tileW / 2;
@@ -699,12 +692,31 @@ function removePair(a, b) {
     const endBx = endBCx - tileW / 2;
     const endBy = endBCy - tileH / 2;
 
-    // Arc curve: perpendicular offset for aesthetic curve
-    const arcHeight = Math.max(20, dist * 0.25);
-    const px = -ny;
-    const py = nx;
+    // Arc trajectory: tiles should NOT fly over each other.
+    // Determine how "vertical" the arrangement is to decide arc direction.
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
 
-    // Control points for each tile's arc
+    // Perpendicular to the line connecting A→B (used for arc curvature)
+    const nx = dx / (dist || 1);
+    const ny = dy / (dist || 1);
+    const px = -ny; // perpendicular X
+    const py = nx;  // perpendicular Y
+
+    let arcHeight = Math.max(20, dist * 0.25);
+
+    // If tiles are mostly vertical (one above the other), they need to arc
+    // sideways so they don't fly through each other. We increase the arc
+    // and ensure the perpendicular direction pushes them apart horizontally.
+    if (absDy > absDx * 1.2) {
+        // Vertical arrangement — increase arc so tiles swing wide to the sides
+        arcHeight = Math.max(40, dist * 0.4);
+    }
+
+    // Choose arc direction: tile A arcs one way, tile B arcs the opposite way.
+    // This ensures they fly around each other, not through each other.
+    // For tile A: control point is offset perpendicular from A→meetingPoint midpoint
+    // For tile B: control point is offset opposite perpendicular from B→meetingPoint midpoint
     const arcMidAx = (ax + endAx) / 2 + px * arcHeight;
     const arcMidAy = (ay + endAy) / 2 + py * arcHeight;
     const arcMidBx = (bx + endBx) / 2 - px * arcHeight;
@@ -716,7 +728,7 @@ function removePair(a, b) {
     function onFinish() {
         finished++;
         if (finished === 2) {
-            createParticles(midCx, midCy);
+            createParticles(meetX, meetY);
             if (elA) elA.remove();
             if (elB) elB.remove();
             applyZoom();
