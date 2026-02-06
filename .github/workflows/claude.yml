@@ -112,6 +112,8 @@ jobs:
       - name: Setup Claude notifications
         run: |
           if [ -f "./notify.sh" ]; then
+            # Fix Windows line endings if present
+            sed -i 's/\r$//' ./notify.sh
             chmod +x ./notify.sh
             echo "✅ notify.sh ready"
           else
@@ -126,11 +128,18 @@ jobs:
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
           GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
+          echo "DEBUG: BOT_NOTIFY_URL is set: $( [ -n \"$BOT_NOTIFY_URL\" ] && echo 'yes' || echo 'no' )"
+          echo "DEBUG: ISSUE_NUMBER=$ISSUE_NUMBER"
+          echo "DEBUG: GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
           if [ -f "./notify.sh" ]; then
+            echo "DEBUG: notify.sh exists, calling it..."
             ./notify.sh info "Claude приступает к задаче: ${{ steps.dev.outputs.issue_title }}"
+            echo "DEBUG: notify.sh exit code: $?"
+          else
+            echo "DEBUG: notify.sh NOT FOUND"
           fi
 
-      # 9. Готовим промпт из issue
+      # 10. Готовим промпт из issue
       - name: Prepare prompt
         id: prompt
         shell: bash
