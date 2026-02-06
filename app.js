@@ -172,6 +172,7 @@ let score = 0;
 let moves = 0;
 let gameRunning = false;
 let hintTimeout = null;
+let maxLayer = 3; // Maximum layer in current layout
 
 // DOM elements
 const boardEl = document.getElementById('game-board');
@@ -184,18 +185,6 @@ const overlayMessage = document.getElementById('overlay-message');
 const startBtn = document.getElementById('btn-start');
 const hintBtn = document.getElementById('btn-hint');
 const shuffleBtn = document.getElementById('btn-shuffle');
-
-// Colorize title helper
-const TITLE_COLORS = ['clr-1','clr-2','clr-3','clr-4','clr-5','clr-6','clr-7','clr-8','clr-9'];
-function colorizeTitle(text) {
-    let colorIdx = 0;
-    return text.split('').map(ch => {
-        if (ch === ' ') return ' ';
-        const cls = TITLE_COLORS[colorIdx % TITLE_COLORS.length];
-        colorIdx++;
-        return `<span class="${cls}">${ch}</span>`;
-    }).join('');
-}
 
 // Shuffle an array in place (Fisher-Yates)
 function shuffle(arr) {
@@ -263,11 +252,40 @@ function findAvailableMatches() {
     return matches;
 }
 
+// Calculate the current highest active layer for zoom purposes
+function getActiveMaxLayer() {
+    let maxL = 0;
+    for (const t of tiles) {
+        if (!t.removed && t.layer > maxL) {
+            maxL = t.layer;
+        }
+    }
+    return maxL;
+}
+
+// Calculate zoom scale based on remaining tiles
+function calculateZoomScale() {
+    const remaining = tiles.filter(t => !t.removed).length;
+    const total = tiles.length;
+    if (total === 0) return 1;
+
+    const removedRatio = 1 - (remaining / total);
+    // Zoom in gradually: from 1.0 at start to ~1.3 when most tiles removed
+    // Use a gentle curve so it's not too jarring
+    return 1 + removedRatio * 0.35;
+}
+
+// Apply zoom to the board
+function applyZoom() {
+    const scale = calculateZoomScale();
+    boardEl.style.transform = `scale(${scale})`;
+}
+
 // Calculate tile sizes and scale based on available space
 function calculateLayout() {
     const boardArea = document.querySelector('.game-board-area');
-    const availW = boardArea.clientWidth - 16;
-    const availH = boardArea.clientHeight - 16;
+    const availW = boardArea.clientWidth - 8;
+    const availH = boardArea.clientHeight - 8;
 
     // Find bounds of the layout
     let maxR = 0, maxC = 0;
@@ -291,7 +309,7 @@ function calculateLayout() {
     let tileH = tileW / 0.78;
 
     // Clamp
-    tileW = Math.max(24, Math.min(tileW, 48));
+    tileW = Math.max(24, Math.min(tileW, 52));
     tileH = tileW / 0.78;
 
     return { tileW, tileH, gridCols, gridRows };
@@ -304,20 +322,23 @@ function renderBoard() {
     const { tileW, tileH, gridCols, gridRows } = calculateLayout();
 
     // Set CSS variables for tile size
-    const fontSize = Math.max(12, Math.floor(tileW * 0.55));
+    const fontSize = Math.max(14, Math.floor(tileW * 0.55));
     document.documentElement.style.setProperty('--tile-w', tileW + 'px');
     document.documentElement.style.setProperty('--tile-h', tileH + 'px');
     document.documentElement.style.setProperty('--tile-font', fontSize + 'px');
 
     // Layer offset for 3D effect
-    const layerOffsetX = Math.max(2, tileW * 0.08);
-    const layerOffsetY = Math.max(2, tileH * 0.08);
+    const layerOffsetX = Math.max(3, tileW * 0.09);
+    const layerOffsetY = Math.max(3, tileH * 0.09);
 
     // Calculate board dimensions
     const boardW = (gridCols / 2) * tileW + 4 * layerOffsetX + 10;
     const boardH = (gridRows / 2) * tileH + 4 * layerOffsetY + 10;
     boardEl.style.width = boardW + 'px';
     boardEl.style.height = boardH + 'px';
+
+    // Determine current max layer for gold highlighting
+    const currentMaxLayer = getActiveMaxLayer();
 
     // Sort tiles by layer (draw bottom layers first) then by position
     const sortedTiles = [...tiles]
@@ -332,6 +353,11 @@ function renderBoard() {
         const el = document.createElement('div');
         el.className = 'mahjong-tile';
         el.dataset.id = tile.id;
+
+        // Add gold class for tiles on upper layers (layer 2+)
+        if (tile.layer >= 2) {
+            el.classList.add('layer-top');
+        }
 
         // Position: each grid unit = half tile
         const x = (tile.c / 2) * tileW + tile.layer * layerOffsetX;
@@ -349,6 +375,11 @@ function renderBoard() {
         sideBottom.className = 'tile-side-bottom';
         el.appendChild(sideBottom);
 
+        // Corner piece for 3D effect
+        const corner = document.createElement('div');
+        corner.className = 'tile-corner';
+        el.appendChild(corner);
+
         // Tile face
         const face = document.createElement('div');
         face.className = 'tile-face';
@@ -364,6 +395,9 @@ function renderBoard() {
 
         boardEl.appendChild(el);
     }
+
+    // Apply current zoom level
+    applyZoom();
 }
 
 // Update the visual state of tiles (selected, free/blocked) without full re-render
@@ -431,8 +465,12 @@ function removePair(a, b) {
         if (elA) elA.remove();
         if (elB) elB.remove();
         updateTileStates();
+
+        // Apply zoom-in after tiles removed
+        applyZoom();
+
         checkGameState();
-    }, 300);
+    }, 350);
 }
 
 // Update UI counters
@@ -451,9 +489,9 @@ function checkGameState() {
         gameRunning = false;
         score += 1000; // Bonus for winning
         updateUI();
-        overlayTitle.innerHTML = colorizeTitle('YOU WIN');
-        overlayMessage.textContent = `Score: ${score} | Moves: ${moves}`;
-        startBtn.textContent = 'Play again';
+        overlayTitle.textContent = 'YOU WIN!';
+        overlayMessage.textContent = `Score: ${score} | Matches: ${moves}`;
+        startBtn.textContent = 'Play Again';
         overlay.classList.remove('hidden');
         return;
     }
@@ -462,9 +500,9 @@ function checkGameState() {
     if (matches.length === 0) {
         // No moves available — game stuck
         gameRunning = false;
-        overlayTitle.innerHTML = colorizeTitle('NO MOVES');
+        overlayTitle.textContent = 'NO MOVES';
         overlayMessage.textContent = `No more matches available. Score: ${score}`;
-        startBtn.textContent = 'New game';
+        startBtn.textContent = 'New Game';
         overlay.classList.remove('hidden');
     }
 }
@@ -542,6 +580,12 @@ function startGame() {
             c: pos.c,
             removed: false,
         });
+    }
+
+    // Calculate max layer
+    maxLayer = 0;
+    for (const t of tiles) {
+        if (t.layer > maxLayer) maxLayer = t.layer;
     }
 
     selectedTile = null;
