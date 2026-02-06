@@ -3,6 +3,8 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
+tg.setHeaderColor('#072e27');
+tg.setBackgroundColor('#072e27');
 
 // Mahjong tile definitions — 36 types, 4 of each = 144 tiles
 // Categories: Dots (1-9), Bamboo (1-9), Characters (1-9), Winds (4), Dragons (3), Seasons (4), Flowers (4)
