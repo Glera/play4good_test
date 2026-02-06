@@ -374,9 +374,9 @@ function endGame() {
     gameRunning = false;
     gameOver = true;
 
-    overlayTitle.textContent = 'ИГРА ОКОНЧЕНА';
-    overlayMessage.textContent = `Счёт: ${score}`;
-    startBtn.textContent = 'Играть снова';
+    overlayTitle.textContent = 'GAME OVER';
+    overlayMessage.textContent = `Score: ${score}`;
+    startBtn.textContent = 'Play again';
     overlay.classList.remove('hidden');
 }
 
