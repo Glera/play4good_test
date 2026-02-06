@@ -740,17 +740,127 @@ function shuffleTiles() {
     }
 }
 
-// Start a new game
-function startGame() {
+// Check if a position is "free" (removable) given a set of occupied positions
+// A position is free if nothing is on top and at least one side (left or right) is open
+function isPositionFree(pos, occupied) {
+    // Check if anything is on top
+    for (const other of occupied) {
+        if (other === pos) continue;
+        if (other.layer > pos.layer &&
+            Math.abs(other.r - pos.r) < 2 &&
+            Math.abs(other.c - pos.c) < 2) {
+            return false;
+        }
+    }
+
+    // Check left/right neighbors on the same layer
+    let blockedLeft = false;
+    let blockedRight = false;
+
+    for (const other of occupied) {
+        if (other === pos) continue;
+        if (other.layer === pos.layer && Math.abs(other.r - pos.r) < 2) {
+            const dc = other.c - pos.c;
+            if (dc >= 1.5 && dc <= 2.5) blockedRight = true;
+            if (dc <= -1.5 && dc >= -2.5) blockedLeft = true;
+        }
+    }
+
+    return !blockedLeft || !blockedRight;
+}
+
+// Generate a solvable tile placement using reverse layout method
+// 1. Start with all positions "occupied"
+// 2. Find free (removable) positions, pick pairs, assign matching tiles
+// 3. Remove those positions from occupied set
+// 4. Repeat until all positions are assigned
+function generateSolvableLayout(positions) {
     const tileSet = buildTileSet();
     shuffle(tileSet);
 
+    // Group tiles into pairs by matchGroup
+    const pairGroups = {};
+    for (const tile of tileSet) {
+        if (!pairGroups[tile.matchGroup]) pairGroups[tile.matchGroup] = [];
+        pairGroups[tile.matchGroup].push(tile);
+    }
+
+    // Build list of pairs: each matchGroup has 4 tiles = 2 pairs (except seasons/flowers which are 4 tiles = 2 pairs)
+    const pairs = [];
+    for (const group of Object.values(pairGroups)) {
+        shuffle(group);
+        for (let i = 0; i < group.length; i += 2) {
+            pairs.push([group[i], group[i + 1]]);
+        }
+    }
+    shuffle(pairs);
+
+    // All positions start as occupied
+    const occupied = positions.map(p => ({ ...p }));
+    const assignment = new Array(positions.length).fill(null); // index -> tile data
+
+    let pairIndex = 0;
+
+    // Repeatedly find free positions and assign pairs
+    while (pairIndex < pairs.length) {
+        // Build active list once per iteration
+        const active = occupied.filter(Boolean);
+
+        // Find all free positions in current occupied set
+        const freeIndices = [];
+        for (let i = 0; i < occupied.length; i++) {
+            if (occupied[i] && isPositionFree(occupied[i], active)) {
+                freeIndices.push(i);
+            }
+        }
+
+        if (freeIndices.length < 2) {
+            // Shouldn't happen with a valid layout, but fallback: break and fill remaining randomly
+            break;
+        }
+
+        // Shuffle free positions to add randomness
+        shuffle(freeIndices);
+
+        // Pick two free positions and assign a matching pair
+        const idx1 = freeIndices[0];
+        const idx2 = freeIndices[1];
+
+        const [tileA, tileB] = pairs[pairIndex];
+        assignment[idx1] = tileA;
+        assignment[idx2] = tileB;
+
+        // "Remove" these positions from occupied
+        occupied[idx1] = null;
+        occupied[idx2] = null;
+
+        pairIndex++;
+    }
+
+    // Fallback: assign any remaining pairs to unassigned positions
+    const unassigned = [];
+    for (let i = 0; i < assignment.length; i++) {
+        if (!assignment[i]) unassigned.push(i);
+    }
+    while (pairIndex < pairs.length && unassigned.length >= 2) {
+        const [tileA, tileB] = pairs[pairIndex];
+        assignment[unassigned.pop()] = tileA;
+        assignment[unassigned.pop()] = tileB;
+        pairIndex++;
+    }
+
+    return assignment;
+}
+
+// Start a new game
+function startGame() {
     const positions = getTurtleLayout();
+    const assignment = generateSolvableLayout(positions);
 
     tiles = [];
     for (let i = 0; i < positions.length; i++) {
         const pos = positions[i];
-        const tileData = tileSet[i];
+        const tileData = assignment[i];
         tiles.push({
             id: tileData.id,
             face: tileData.face,
