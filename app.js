@@ -6,6 +6,16 @@ tg.expand();
 tg.setHeaderColor('#072e27');
 tg.setBackgroundColor('#072e27');
 
+// Disable vertical swipe to close for smoother gameplay in Telegram WebView
+if (tg.disableVerticalSwipes) {
+    tg.disableVerticalSwipes();
+}
+
+// Lock viewport height to prevent WebView resize jitter
+if (tg.isExpanded) {
+    document.documentElement.style.height = '100vh';
+}
+
 // Mahjong tile definitions — 36 types, 4 of each = 144 tiles
 // Categories: Dots (1-9), Bamboo (1-9), Characters (1-9), Winds (4), Dragons (3), Seasons (4), Flowers (4)
 // Seasons and Flowers are unique but each group of 4 matches with each other
@@ -337,10 +347,25 @@ function calculateZoom() {
     return { scale, translateX: tx, translateY: ty };
 }
 
-// Apply zoom to the board
+// Apply zoom to the board (batched via rAF for smooth rendering)
+let zoomRafId = null;
 function applyZoom() {
+    if (zoomRafId) return; // already scheduled
+    zoomRafId = requestAnimationFrame(() => {
+        zoomRafId = null;
+        const { scale, translateX, translateY } = calculateZoom();
+        boardEl.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`;
+    });
+}
+
+// Force-apply zoom synchronously (for cases where we need immediate update)
+function applyZoomSync() {
+    if (zoomRafId) {
+        cancelAnimationFrame(zoomRafId);
+        zoomRafId = null;
+    }
     const { scale, translateX, translateY } = calculateZoom();
-    boardEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    boardEl.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`;
 }
 
 // Calculate tile sizes and scale based on available space
@@ -430,6 +455,9 @@ function renderBoard(animate) {
             return a.c - b.c;
         });
 
+    // Use DocumentFragment to batch DOM insertions (avoids layout thrashing)
+    const fragment = document.createDocumentFragment();
+
     for (let idx = 0; idx < sortedTiles.length; idx++) {
         const tile = sortedTiles[idx];
         const el = document.createElement('div');
@@ -480,11 +508,13 @@ function renderBoard(animate) {
             el.classList.add('fly-in');
         }
 
-        boardEl.appendChild(el);
+        fragment.appendChild(el);
     }
 
-    // Apply current zoom level
-    applyZoom();
+    boardEl.appendChild(fragment);
+
+    // Apply current zoom level synchronously after render
+    applyZoomSync();
 }
 
 // Update the visual state of tiles (selected, free/blocked) without full re-render
@@ -556,11 +586,13 @@ function createParticles(x, y) {
     }
 }
 
-// Animate a tile along a quadratic bezier arc
+// Animate a tile along a quadratic bezier arc using CSS transforms (GPU-accelerated)
 function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDone) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
     el.style.zIndex = 9998;
+    // Use transform instead of left/top for GPU-accelerated animation
+    el.style.willChange = 'transform';
 
     function step(now) {
         const t = Math.min((now - startTime) / duration, 1);
@@ -568,12 +600,15 @@ function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDo
         const inv = 1 - t;
         const x = inv * inv * startX + 2 * inv * t * ctrlX + t * t * endX;
         const y = inv * inv * startY + 2 * inv * t * ctrlY + t * t * endY;
-        el.style.left = x + 'px';
-        el.style.top = y + 'px';
+        // Use translate3d for GPU compositing instead of left/top
+        const dx = x - startX;
+        const dy = y - startY;
+        el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
         if (t < 1) {
             requestAnimationFrame(step);
-        } else if (onDone) {
-            onDone();
+        } else {
+            el.style.willChange = '';
+            if (onDone) onDone();
         }
     }
     requestAnimationFrame(step);
@@ -1037,16 +1072,34 @@ hintBtn.addEventListener('click', showHint);
 shuffleBtn.addEventListener('click', shuffleTiles);
 if (autoPlayBtn) autoPlayBtn.addEventListener('click', doAutoMove);
 
-// Prevent scrolling on touch
+// Prevent scrolling/zooming on touch — critical for Telegram WebView stability
 document.addEventListener('touchmove', (e) => {
-    if (gameRunning) {
-        e.preventDefault();
-    }
+    e.preventDefault();
 }, { passive: false });
 
-// Handle window resize — re-render the board
+// Prevent double-tap zoom on iOS WebView
+document.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+}, { passive: false });
+
+// Prevent pinch-zoom gestures in WebView
+document.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+}, { passive: false });
+document.addEventListener('gesturechange', (e) => {
+    e.preventDefault();
+}, { passive: false });
+document.addEventListener('gestureend', (e) => {
+    e.preventDefault();
+}, { passive: false });
+
+// Handle window resize — debounced re-render of the board
+let resizeTimer = null;
 window.addEventListener('resize', () => {
-    if (gameRunning && tiles.length > 0) {
+    if (!gameRunning || tiles.length === 0) return;
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        resizeTimer = null;
         renderBoard();
-    }
+    }, 150);
 });

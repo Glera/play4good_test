@@ -10,6 +10,10 @@ html, body {
     position: fixed;
     width: 100%;
     background: #072e27;
+    -webkit-touch-callout: none;
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 body {
@@ -30,6 +34,7 @@ body {
     flex-direction: column;
     position: relative;
     overflow: hidden;
+    contain: layout style;
 }
 
 /* ─── Header ─── */
@@ -97,12 +102,17 @@ body {
     overflow: hidden;
     min-height: 0;
     padding: 2px;
+    touch-action: none;
+    -webkit-overflow-scrolling: touch;
 }
 
 .mahjong-board {
     position: relative;
     transform-origin: center center;
-    transition: transform 0.5s ease;
+    transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform;
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
 }
 
 /* ─── Tiles ─── */
@@ -115,6 +125,10 @@ body {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     transition: transform 0.15s ease, filter 0.15s ease;
+    will-change: transform, opacity;
+    -webkit-transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
 }
 
 .tile-face {
@@ -134,11 +148,14 @@ body {
     text-shadow: none;
     color: #333;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.8), inset 0 -1px 0 rgba(0,0,0,0.08);
+    -webkit-transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
 }
 
 .tile-face-content {
     display: block;
-    transform: translateY(-12%);
+    transform: translateY(-12%) translateZ(0);
 }
 
 /* Tile states */
@@ -185,11 +202,13 @@ body {
     pointer-events: none;
     z-index: 9999;
     animation: particle-burst 0.5s ease-out forwards;
+    will-change: transform, opacity;
+    -webkit-transform: translateZ(0);
 }
 
 @keyframes particle-burst {
-    0% { opacity: 1; transform: translate(0, 0) scale(1); }
-    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0); }
+    0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    100% { opacity: 0; transform: translate3d(var(--dx), var(--dy), 0) scale(0); }
 }
 
 /* Board assembly: tiles fly in from off-screen */
@@ -198,9 +217,9 @@ body {
 }
 
 @keyframes fly-in-anim {
-    0% { opacity: 0; transform: translate(var(--fly-in-x), var(--fly-in-y)) scale(0.5) rotate(15deg); }
-    70% { opacity: 1; transform: translate(0, 0) scale(1.05) rotate(-2deg); }
-    100% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
+    0% { opacity: 0; transform: translate3d(var(--fly-in-x), var(--fly-in-y), 0) scale(0.5) rotate(15deg); }
+    70% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.05) rotate(-2deg); }
+    100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
 }
 
 /* Shuffle: tiles fly out to random edges */
@@ -209,8 +228,8 @@ body {
 }
 
 @keyframes fly-out-anim {
-    0% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
-    100% { opacity: 0; transform: translate(var(--fly-out-x), var(--fly-out-y)) scale(0.4) rotate(-20deg); }
+    0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+    100% { opacity: 0; transform: translate3d(var(--fly-out-x), var(--fly-out-y), 0) scale(0.4) rotate(-20deg); }
 }
 
 .mahjong-tile.matched {
@@ -218,9 +237,9 @@ body {
 }
 
 @keyframes tile-remove {
-    0% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(1.1); }
-    100% { opacity: 0; transform: scale(0.3); }
+    0% { opacity: 1; transform: scale(1) translateZ(0); }
+    50% { opacity: 0.5; transform: scale(1.1) translateZ(0); }
+    100% { opacity: 0; transform: scale(0.3) translateZ(0); }
 }
 
 /* ─── Tiles Counter ─── */
@@ -331,6 +350,7 @@ body {
 
 .game-overlay.hidden {
     display: none;
+    will-change: auto;
 }
 
 .overlay-content {

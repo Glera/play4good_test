@@ -3,9 +3,9 @@
 История изменений для cherry-pick в main.
 
 ## #97 — почему-то в веб вью телеграм фон белый, а не зеленый как в вебе
-**Дата:** 2026-02-06  
-**Ветка:** dev/Gleb  
-**Коммит:** `f2cece6`  
+**Дата:** 2026-02-06
+**Ветка:** dev/Gleb
+**Коммит:** `f2cece6`
 **Статус:** ✅ готово к переносу
 
 ### Изменённые файлы
@@ -38,6 +38,27 @@ git cherry-pick f2cece63f9a7b78b65ca6b97264eef2c51158f7a
 ### Как перенести в main
 ```bash
 git cherry-pick 697cf8474b560769658f0d07969fda7e56fd773c
+```
+
+---
+
+## #96 — оптимизация под запуск в WebView Telegram
+**Дата:** 2026-02-06
+**Ветка:** dev/Gleb
+**Коммит:** `a7c6858`
+**Статус:** ✅ готово к переносу
+
+### Что сделано
+Комплексная оптимизация производительности для Telegram WebView: GPU-ускорение всех анимаций через translate3d и will-change, замена left/top на transform в animateArc, батчинг DOM-вставок через DocumentFragment, дебаунс resize, блокировка pinch-zoom/double-tap/vertical-swipe жестов, viewport-fit=cover.
+
+### Изменённые файлы
+- `app.js` — GPU-ускоренные анимации, rAF-батчинг zoom, debounced resize, блокировка жестов WebView, disableVerticalSwipes
+- `style.css` — will-change, backface-visibility, translate3d в keyframes, touch-action:none, contain:layout, font-smoothing
+- `index.html` — viewport-fit=cover, minimum-scale=1.0
+
+### Как перенести в main
+```bash
+git cherry-pick a7c6858b33742d3cedf350937f2df78f1f8a7720
 ```
 
 ---
