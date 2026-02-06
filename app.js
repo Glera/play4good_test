@@ -58,12 +58,16 @@ function buildTileSet() {
 }
 
 // Classic Turtle layout targeting exactly 144 positions
+// Transposed for portrait orientation (taller than wide)
 function getTurtleLayout() {
     const positions = [];
 
-    // Layer 0 — bottom (largest) — 86 tiles
+    // Original layout is ~15 cols × 7 rows (landscape)
+    // We transpose: swap r↔c so it becomes ~7 cols × 15 rows (portrait)
+
+    // Layer 0 — bottom (largest)
     const layer0 = [
-        // Row 0: 12 tiles
+        // Row 0: 12 tiles (was col positions, now row positions)
         [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],
         // Row 1: 8 tiles
         [6, 8, 10, 12, 14, 16, 18, 20],
@@ -78,34 +82,27 @@ function getTurtleLayout() {
         // Row 6: 12 tiles
         [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],
     ];
-    // Total: 12+8+10+14+10+8+12 = 74
 
     for (let row = 0; row < layer0.length; row++) {
         for (const col of layer0[row]) {
-            positions.push({ layer: 0, r: row * 2, c: col });
+            // Transpose: old (r, c) → new (c, r) so board is portrait
+            positions.push({ layer: 0, r: col, c: row * 2 });
         }
     }
 
-    // Layer 1 — 40 tiles
+    // Layer 1 — 36 tiles
     const layer1 = [
-        // Row 0: 6
         [8, 10, 12, 14, 16, 18],
-        // Row 1: 6
         [8, 10, 12, 14, 16, 18],
-        // Row 2: 6
         [8, 10, 12, 14, 16, 18],
-        // Row 3: 6
         [8, 10, 12, 14, 16, 18],
-        // Row 4: 6
         [8, 10, 12, 14, 16, 18],
-        // Row 5: 6
         [8, 10, 12, 14, 16, 18],
     ];
-    // Total: 36
 
     for (let row = 0; row < layer1.length; row++) {
         for (const col of layer1[row]) {
-            positions.push({ layer: 1, r: (row + 0.5) * 2, c: col + 1 });
+            positions.push({ layer: 1, r: col + 1, c: (row + 0.5) * 2 });
         }
     }
 
@@ -116,11 +113,10 @@ function getTurtleLayout() {
         [10, 12, 14, 16],
         [10, 12, 14, 16],
     ];
-    // Total: 16
 
     for (let row = 0; row < layer2.length; row++) {
         for (const col of layer2[row]) {
-            positions.push({ layer: 2, r: (row + 1) * 2, c: col + 2 });
+            positions.push({ layer: 2, r: col + 2, c: (row + 1) * 2 });
         }
     }
 
@@ -129,32 +125,29 @@ function getTurtleLayout() {
         [12, 14],
         [12, 14],
     ];
-    // Total: 4
 
     for (let row = 0; row < layer3.length; row++) {
         for (const col of layer3[row]) {
-            positions.push({ layer: 3, r: (row + 1.5) * 2, c: col + 3 });
+            positions.push({ layer: 3, r: col + 3, c: (row + 1.5) * 2 });
         }
     }
 
-    // Total so far: 74 + 36 + 16 + 4 = 130
-    // Need 14 more — add layer edges to layer 0
-    // Add extra tiles to extend layer 0 wings
+    // Extra tiles to reach 144 total (transposed)
     const extras = [
-        { layer: 0, r: 2, c: 24 },
-        { layer: 0, r: 2, c: 4 },
-        { layer: 0, r: 10, c: 24 },
-        { layer: 0, r: 10, c: 4 },
-        { layer: 0, r: 4, c: 24 },
-        { layer: 0, r: 8, c: 24 },
+        { layer: 0, r: 24, c: 2 },
         { layer: 0, r: 4, c: 2 },
-        { layer: 0, r: 8, c: 2 },
-        { layer: 0, r: 0, c: 2 },
-        { layer: 0, r: 12, c: 2 },
-        { layer: 0, r: 0, c: 28 },
-        { layer: 0, r: 12, c: 28 },
-        { layer: 3, r: 5, c: 16 },
-        { layer: 3, r: 7, c: 16 },
+        { layer: 0, r: 24, c: 10 },
+        { layer: 0, r: 4, c: 10 },
+        { layer: 0, r: 24, c: 4 },
+        { layer: 0, r: 24, c: 8 },
+        { layer: 0, r: 2, c: 4 },
+        { layer: 0, r: 2, c: 8 },
+        { layer: 0, r: 2, c: 0 },
+        { layer: 0, r: 2, c: 12 },
+        { layer: 0, r: 28, c: 0 },
+        { layer: 0, r: 28, c: 12 },
+        { layer: 3, r: 16, c: 5 },
+        { layer: 3, r: 16, c: 7 },
     ];
 
     for (const pos of extras) {
@@ -216,19 +209,19 @@ function isTileFree(tile) {
         }
     }
 
-    // Check left/right neighbors on the same layer
-    let blockedLeft = false;
-    let blockedRight = false;
+    // Check top/bottom neighbors on the same layer (portrait layout — tiles slide up/down)
+    let blockedTop = false;
+    let blockedBottom = false;
 
     for (const t of activeTiles) {
-        if (t.layer === tile.layer && Math.abs(t.r - tile.r) < 2) {
-            const dc = t.c - tile.c;
-            if (dc >= 1.5 && dc <= 2.5) blockedRight = true;
-            if (dc <= -1.5 && dc >= -2.5) blockedLeft = true;
+        if (t.layer === tile.layer && Math.abs(t.c - tile.c) < 2) {
+            const dr = t.r - tile.r;
+            if (dr >= 1.5 && dr <= 2.5) blockedBottom = true;
+            if (dr <= -1.5 && dr >= -2.5) blockedTop = true;
         }
     }
 
-    return !blockedLeft || !blockedRight;
+    return !blockedTop || !blockedBottom;
 }
 
 // Check if two tiles match
@@ -309,7 +302,7 @@ function calculateLayout() {
     let tileH = tileW / 0.85;
 
     // Clamp — allow larger tiles for bigger screens
-    tileW = Math.max(24, Math.min(tileW, 60));
+    tileW = Math.max(24, Math.min(tileW, 64));
     tileH = tileW / 0.85;
 
     return { tileW, tileH, gridCols, gridRows };
@@ -322,7 +315,7 @@ function renderBoard(animate) {
     const { tileW, tileH, gridCols, gridRows } = calculateLayout();
 
     // Set CSS variables for tile size
-    const fontSize = Math.max(16, Math.floor(tileW * 0.75));
+    const fontSize = Math.max(16, Math.floor(tileW * 0.92));
     document.documentElement.style.setProperty('--tile-w', tileW + 'px');
     document.documentElement.style.setProperty('--tile-h', tileH + 'px');
     document.documentElement.style.setProperty('--tile-font', fontSize + 'px');
@@ -361,20 +354,6 @@ function renderBoard(animate) {
         el.style.left = x + 'px';
         el.style.top = y + 'px';
         el.style.zIndex = tile.layer * 100 + Math.floor(tile.r) * 10;
-
-        // 3D depth sides
-        const sideRight = document.createElement('div');
-        sideRight.className = 'tile-side-right';
-        el.appendChild(sideRight);
-
-        const sideBottom = document.createElement('div');
-        sideBottom.className = 'tile-side-bottom';
-        el.appendChild(sideBottom);
-
-        // Corner piece for 3D effect
-        const corner = document.createElement('div');
-        corner.className = 'tile-corner';
-        el.appendChild(corner);
 
         // Tile face
         const face = document.createElement('div');
@@ -489,7 +468,34 @@ function createParticles(x, y) {
     }
 }
 
-// Remove a matched pair with fly-together animation
+// Animate a tile along a quadratic bezier arc
+function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDone) {
+    const startTime = performance.now();
+    el.style.pointerEvents = 'none';
+    el.style.zIndex = 9998;
+
+    function step(now) {
+        const t = Math.min((now - startTime) / duration, 1);
+        // Quadratic bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+        const inv = 1 - t;
+        const x = inv * inv * startX + 2 * inv * t * ctrlX + t * t * endX;
+        const y = inv * inv * startY + 2 * inv * t * ctrlY + t * t * endY;
+        const scale = 1 - t * 0.6; // shrink as they approach
+        const opacity = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.transform = `scale(${scale})`;
+        el.style.opacity = opacity;
+        if (t < 1) {
+            requestAnimationFrame(step);
+        } else if (onDone) {
+            onDone();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+// Remove a matched pair with fly-together arc animation
 function removePair(a, b) {
     a.removed = true;
     b.removed = true;
@@ -513,43 +519,47 @@ function removePair(a, b) {
     const bx = parseFloat(elB.style.left);
     const by = parseFloat(elB.style.top);
 
-    // Midpoint
+    // Midpoint where tiles will meet
     const midX = (ax + bx) / 2;
     const midY = (ay + by) / 2;
 
-    // Calculate fly offsets for each tile
-    const flyAx = midX - ax;
-    const flyAy = midY - ay;
-    const flyBx = midX - bx;
-    const flyBy = midY - by;
+    // Calculate perpendicular offset for the arc curve
+    const dx = bx - ax;
+    const dy = by - ay;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    // Arc height is proportional to distance, perpendicular to the line between tiles
+    const arcHeight = Math.max(30, dist * 0.35);
+    // Perpendicular direction (normalized)
+    const px = -dy / (dist || 1);
+    const py = dx / (dist || 1);
 
-    elA.style.setProperty('--fly-x', flyAx + 'px');
-    elA.style.setProperty('--fly-y', flyAy + 'px');
-    elB.style.setProperty('--fly-x', flyBx + 'px');
-    elB.style.setProperty('--fly-y', flyBy + 'px');
+    // Control points for each tile's arc (curve in opposite directions)
+    const ctrlAx = midX + px * arcHeight;
+    const ctrlAy = midY + py * arcHeight;
+    const ctrlBx = midX - px * arcHeight;
+    const ctrlBy = midY - py * arcHeight;
 
-    elA.classList.add('fly-match');
-    elB.classList.add('fly-match');
+    const duration = 450;
+    let finished = 0;
+
+    function onFinish() {
+        finished++;
+        if (finished === 2) {
+            const tileW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-w'));
+            const tileH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-h'));
+            createParticles(midX + tileW / 2, midY + tileH / 2);
+            if (elA) elA.remove();
+            if (elB) elB.remove();
+            updateTileStates();
+            applyZoom();
+            checkGameState();
+        }
+    }
+
+    animateArc(elA, ax, ay, ctrlAx, ctrlAy, midX, midY, duration, onFinish);
+    animateArc(elB, bx, by, ctrlBx, ctrlBy, midX, midY, duration, onFinish);
 
     updateUI();
-
-    // Spawn particles at midpoint after tiles meet
-    setTimeout(() => {
-        const tileW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-w'));
-        const tileH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-h'));
-        createParticles(midX + tileW / 2, midY + tileH / 2);
-    }, 280);
-
-    setTimeout(() => {
-        if (elA) elA.remove();
-        if (elB) elB.remove();
-        updateTileStates();
-
-        // Apply zoom-in after tiles removed
-        applyZoom();
-
-        checkGameState();
-    }, 450);
 }
 
 // Update UI counters
