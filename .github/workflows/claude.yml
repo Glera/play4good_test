@@ -108,7 +108,17 @@ jobs:
           echo "✅ Claude Code CLI installed"
           $HOME/.local/bin/claude --version
 
-      # 8. Готовим промпт из issue
+      # 8. Подготовка notify.sh для коммуникации Claude → Telegram
+      - name: Setup Claude notifications
+        run: |
+          if [ -f "./notify.sh" ]; then
+            chmod +x ./notify.sh
+            echo "✅ notify.sh ready"
+          else
+            echo "⚠️ notify.sh not found — Claude won't be able to send messages"
+          fi
+
+      # 9. Готовим промпт из issue
       - name: Prepare prompt
         id: prompt
         shell: bash
@@ -122,19 +132,29 @@ jobs:
 
           TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
 
+          COMMUNICATION:
+          You have ./notify.sh script to send messages to the developer in Telegram.
+          Usage: ./notify.sh <type> <message>
+          Types: plan, progress, question, done, error, info
+
+          FIRST: Send your work plan:
+          ./notify.sh plan "Your plan here..."
+
           Steps:
           1. Read CLAUDE.md in repo root if it exists
-          2. Look at relevant source files
-          3. Implement the requested changes
-          4. Stage all changes: git add -A
-          5. Commit: git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
-          6. Push: git push origin ${BRANCH}
+          2. Send your plan via ./notify.sh plan "..."
+          3. Look at relevant source files
+          4. Implement the requested changes
+          5. Stage all changes: git add -A
+          6. Commit: git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
+          7. Push: git push origin ${BRANCH}
 
           Rules:
           - Stay on current branch (${BRANCH}), do NOT create new branches
           - Make clean, focused changes
           - Always commit and push when done
           - Do NOT loop or redo work — once pushed, you are DONE
+          - Use ./notify.sh to communicate progress or issues
           PROMPT_EOF
 
           echo "✅ Prompt ready for issue #${ISSUE_NUM} on branch ${BRANCH}"
@@ -149,6 +169,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           set +e
           echo "🧠 Running Claude Code (Opus)..."
@@ -177,6 +200,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           set +e
           echo "🔄 Continuing Opus session (+30 turns)..."
@@ -204,6 +230,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           echo "🔄 Continuing Opus session (final +30 turns, total 110)..."
           claude -p --dangerously-skip-permissions \
@@ -243,6 +272,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           echo "🧠 Retrying Claude Code (Opus)..."
           claude -p --dangerously-skip-permissions \
@@ -286,6 +318,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           set +e
           echo "🧠 Running Claude Code (Sonnet, fallback)..."
@@ -309,6 +344,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           echo "🔄 Continuing Sonnet session (+30 turns)..."
           claude -p --dangerously-skip-permissions \
