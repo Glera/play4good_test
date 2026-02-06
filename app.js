@@ -686,40 +686,51 @@ function shuffleTiles() {
     // Phase 1: Fly out all tiles
     let flyOutCount = 0;
     const totalTiles = tileEls.length;
-
-    for (let i = 0; i < tileEls.length; i++) {
-        const el = tileEls[i];
-        // Random fly-out direction
-        const side = Math.floor(Math.random() * 4);
-        let flyX, flyY;
-        if (side === 0) { flyX = -150 - Math.random() * 200; flyY = (Math.random() - 0.5) * 200; }
-        else if (side === 1) { flyX = boardRect.w + 150 + Math.random() * 200; flyY = (Math.random() - 0.5) * 200; }
-        else if (side === 2) { flyX = (Math.random() - 0.5) * 200; flyY = -150 - Math.random() * 200; }
-        else { flyX = (Math.random() - 0.5) * 200; flyY = boardRect.h + 150 + Math.random() * 200; }
-
-        // Offset from current position
-        const curX = parseFloat(el.style.left) || 0;
-        const curY = parseFloat(el.style.top) || 0;
-        el.style.setProperty('--fly-out-x', (flyX - curX) + 'px');
-        el.style.setProperty('--fly-out-y', (flyY - curY) + 'px');
-        el.style.animationDelay = (i * 3 + Math.random() * 50) + 'ms';
-        el.classList.add('fly-out');
-
-        el.addEventListener('animationend', function handler() {
-            el.removeEventListener('animationend', handler);
-            flyOutCount++;
-            if (flyOutCount === totalTiles) {
-                // Phase 2: All tiles have flown out — reshuffle and fly back in
-                doReshuffle();
-            }
-        });
-    }
+    let reshuffleDone = false;
 
     // Fallback in case no tiles are on the board
     if (totalTiles === 0) {
         shuffleInProgress = false;
         return;
     }
+
+    // Calculate max animation delay + duration for fallback timeout
+    const maxDelay = totalTiles * 3 + 50; // max possible delay
+    const animDuration = 500; // fly-out-anim is 0.5s
+    const fallbackMs = maxDelay + animDuration + 300; // extra safety margin
+
+    for (let i = 0; i < tileEls.length; i++) {
+        const el = tileEls[i];
+        // Random fly-out direction — use pure relative offsets from current position
+        const side = Math.floor(Math.random() * 4);
+        let offX, offY;
+        if (side === 0) { offX = -(boardRect.w + 100 + Math.random() * 150); offY = (Math.random() - 0.5) * 200; } // left
+        else if (side === 1) { offX = boardRect.w + 100 + Math.random() * 150; offY = (Math.random() - 0.5) * 200; } // right
+        else if (side === 2) { offX = (Math.random() - 0.5) * 200; offY = -(boardRect.h + 100 + Math.random() * 150); } // top
+        else { offX = (Math.random() - 0.5) * 200; offY = boardRect.h + 100 + Math.random() * 150; } // bottom
+
+        el.style.setProperty('--fly-out-x', offX + 'px');
+        el.style.setProperty('--fly-out-y', offY + 'px');
+        el.style.animationDelay = (i * 3 + Math.random() * 50) + 'ms';
+        el.classList.add('fly-out');
+
+        el.addEventListener('animationend', function handler() {
+            el.removeEventListener('animationend', handler);
+            flyOutCount++;
+            if (flyOutCount === totalTiles && !reshuffleDone) {
+                reshuffleDone = true;
+                doReshuffle();
+            }
+        });
+    }
+
+    // Safety fallback: if animationend events don't all fire, force reshuffle
+    setTimeout(() => {
+        if (!reshuffleDone) {
+            reshuffleDone = true;
+            doReshuffle();
+        }
+    }, fallbackMs);
 
     function doReshuffle() {
         const active = tiles.filter(t => !t.removed);
