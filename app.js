@@ -3,79 +3,189 @@ const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
-// Game constants
-const COLS = 10;
-const ROWS = 20;
-const BLOCK_SIZE = 24;
-
-// Tetromino shapes and colors (NES-style palette)
-const TETROMINOES = {
-    I: {
-        shape: [[1, 1, 1, 1]],
-        color: '#00bbcc'
-    },
-    O: {
-        shape: [[1, 1], [1, 1]],
-        color: '#cccc00'
-    },
-    T: {
-        shape: [[0, 1, 0], [1, 1, 1]],
-        color: '#9900cc'
-    },
-    S: {
-        shape: [[0, 1, 1], [1, 1, 0]],
-        color: '#00aa00'
-    },
-    Z: {
-        shape: [[1, 1, 0], [0, 1, 1]],
-        color: '#cc0000'
-    },
-    J: {
-        shape: [[1, 0, 0], [1, 1, 1]],
-        color: '#0000cc'
-    },
-    L: {
-        shape: [[0, 0, 1], [1, 1, 1]],
-        color: '#cc6600'
-    }
+// Mahjong tile definitions — 36 types, 4 of each = 144 tiles
+// Categories: Dots (1-9), Bamboo (1-9), Characters (1-9), Winds (4), Dragons (3), Seasons (4), Flowers (4)
+// Seasons and Flowers are unique but each group of 4 matches with each other
+const TILE_SUITS = {
+    dots: ['🀙', '🀚', '🀛', '🀜', '🀝', '🀞', '🀟', '🀠', '🀡'],
+    bamboo: ['🀐', '🀑', '🀒', '🀓', '🀔', '🀕', '🀖', '🀗', '🀘'],
+    chars: ['🀇', '🀈', '🀉', '🀊', '🀋', '🀌', '🀍', '🀎', '🀏'],
+    winds: ['🀀', '🀁', '🀂', '🀃'],
+    dragons: ['🀄', '🀅', '🀆']
 };
 
-const TETROMINO_NAMES = Object.keys(TETROMINOES);
+// Build full tile set: 34 unique types × 4 copies = 136, plus 4 seasons + 4 flowers = 144
+function buildTileSet() {
+    const tiles = [];
+    let id = 0;
+
+    // Suited tiles: 9 of each suit × 4 copies = 108
+    for (const suit of ['dots', 'bamboo', 'chars']) {
+        for (let i = 0; i < 9; i++) {
+            for (let copy = 0; copy < 4; copy++) {
+                tiles.push({ id: id++, face: TILE_SUITS[suit][i], matchGroup: `${suit}_${i}` });
+            }
+        }
+    }
+
+    // Winds: 4 types × 4 copies = 16
+    for (let i = 0; i < 4; i++) {
+        for (let copy = 0; copy < 4; copy++) {
+            tiles.push({ id: id++, face: TILE_SUITS.winds[i], matchGroup: `wind_${i}` });
+        }
+    }
+
+    // Dragons: 3 types × 4 copies = 12
+    for (let i = 0; i < 3; i++) {
+        for (let copy = 0; copy < 4; copy++) {
+            tiles.push({ id: id++, face: TILE_SUITS.dragons[i], matchGroup: `dragon_${i}` });
+        }
+    }
+
+    // Seasons: 4 unique tiles, all match each other
+    const seasons = ['🌸', '🌻', '🍂', '❄️'];
+    for (let i = 0; i < 4; i++) {
+        tiles.push({ id: id++, face: seasons[i], matchGroup: 'season' });
+    }
+
+    // Flowers: 4 unique tiles, all match each other
+    const flowers = ['🌷', '🌺', '🪻', '🌼'];
+    for (let i = 0; i < 4; i++) {
+        tiles.push({ id: id++, face: flowers[i], matchGroup: 'flower' });
+    }
+
+    return tiles; // 144 tiles total
+}
+
+// Classic Turtle layout targeting exactly 144 positions
+function getTurtleLayout() {
+    const positions = [];
+
+    // Layer 0 — bottom (largest) — 86 tiles
+    const layer0 = [
+        // Row 0: 12 tiles
+        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],
+        // Row 1: 8 tiles
+        [6, 8, 10, 12, 14, 16, 18, 20],
+        // Row 2: 10 tiles
+        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
+        // Row 3: 14 tiles (widest — center row with wings)
+        [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28],
+        // Row 4: 10 tiles
+        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
+        // Row 5: 8 tiles
+        [6, 8, 10, 12, 14, 16, 18, 20],
+        // Row 6: 12 tiles
+        [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],
+    ];
+    // Total: 12+8+10+14+10+8+12 = 74
+
+    for (let row = 0; row < layer0.length; row++) {
+        for (const col of layer0[row]) {
+            positions.push({ layer: 0, r: row * 2, c: col });
+        }
+    }
+
+    // Layer 1 — 40 tiles
+    const layer1 = [
+        // Row 0: 6
+        [8, 10, 12, 14, 16, 18],
+        // Row 1: 6
+        [8, 10, 12, 14, 16, 18],
+        // Row 2: 6
+        [8, 10, 12, 14, 16, 18],
+        // Row 3: 6
+        [8, 10, 12, 14, 16, 18],
+        // Row 4: 6
+        [8, 10, 12, 14, 16, 18],
+        // Row 5: 6
+        [8, 10, 12, 14, 16, 18],
+    ];
+    // Total: 36
+
+    for (let row = 0; row < layer1.length; row++) {
+        for (const col of layer1[row]) {
+            positions.push({ layer: 1, r: (row + 0.5) * 2, c: col + 1 });
+        }
+    }
+
+    // Layer 2 — 16 tiles
+    const layer2 = [
+        [10, 12, 14, 16],
+        [10, 12, 14, 16],
+        [10, 12, 14, 16],
+        [10, 12, 14, 16],
+    ];
+    // Total: 16
+
+    for (let row = 0; row < layer2.length; row++) {
+        for (const col of layer2[row]) {
+            positions.push({ layer: 2, r: (row + 1) * 2, c: col + 2 });
+        }
+    }
+
+    // Layer 3 — 4 tiles
+    const layer3 = [
+        [12, 14],
+        [12, 14],
+    ];
+    // Total: 4
+
+    for (let row = 0; row < layer3.length; row++) {
+        for (const col of layer3[row]) {
+            positions.push({ layer: 3, r: (row + 1.5) * 2, c: col + 3 });
+        }
+    }
+
+    // Total so far: 74 + 36 + 16 + 4 = 130
+    // Need 14 more — add layer edges to layer 0
+    // Add extra tiles to extend layer 0 wings
+    const extras = [
+        { layer: 0, r: 2, c: 24 },
+        { layer: 0, r: 2, c: 4 },
+        { layer: 0, r: 10, c: 24 },
+        { layer: 0, r: 10, c: 4 },
+        { layer: 0, r: 4, c: 24 },
+        { layer: 0, r: 8, c: 24 },
+        { layer: 0, r: 4, c: 2 },
+        { layer: 0, r: 8, c: 2 },
+        { layer: 0, r: 0, c: 2 },
+        { layer: 0, r: 12, c: 2 },
+        { layer: 0, r: 0, c: 28 },
+        { layer: 0, r: 12, c: 28 },
+        { layer: 3, r: 5, c: 16 },
+        { layer: 3, r: 7, c: 16 },
+    ];
+
+    for (const pos of extras) {
+        positions.push(pos);
+    }
+
+    // Total: 130 + 14 = 144
+    return positions;
+}
 
 // Game state
-let board = [];
-let currentPiece = null;
-let nextPiece = null;
+let tiles = []; // Array of { id, face, matchGroup, layer, r, c, removed }
+let selectedTile = null;
 let score = 0;
-let level = 1;
-let lines = 0;
+let moves = 0;
 let gameRunning = false;
-let gameOver = false;
-let lastTime = 0;
-let dropInterval = 1000;
-let dropCounter = 0;
+let hintTimeout = null;
 
 // DOM elements
-const canvas = document.getElementById('game-board');
-const ctx = canvas.getContext('2d');
-const nextCanvas = document.getElementById('next-piece');
-const nextCtx = nextCanvas.getContext('2d');
+const boardEl = document.getElementById('game-board');
+const tilesLeftEl = document.getElementById('tiles-left');
+const movesEl = document.getElementById('moves');
 const scoreEl = document.getElementById('score');
-const levelEl = document.getElementById('level');
-const linesEl = document.getElementById('lines');
 const overlay = document.getElementById('game-overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayMessage = document.getElementById('overlay-message');
 const startBtn = document.getElementById('btn-start');
+const hintBtn = document.getElementById('btn-hint');
+const shuffleBtn = document.getElementById('btn-shuffle');
 
-// Control buttons
-const btnLeft = document.getElementById('btn-left');
-const btnRight = document.getElementById('btn-right');
-const btnDown = document.getElementById('btn-down');
-const btnRotate = document.getElementById('btn-rotate');
-const btnDrop = document.getElementById('btn-drop');
-
-// Colorize title: wrap each non-space character in a colored span
+// Colorize title helper
 const TITLE_COLORS = ['clr-1','clr-2','clr-3','clr-4','clr-5','clr-6','clr-7','clr-8','clr-9'];
 function colorizeTitle(text) {
     let colorIdx = 0;
@@ -87,391 +197,378 @@ function colorizeTitle(text) {
     }).join('');
 }
 
-// Initialize canvas sizes
-canvas.width = COLS * BLOCK_SIZE;
-canvas.height = ROWS * BLOCK_SIZE;
-nextCanvas.width = 4 * BLOCK_SIZE;
-nextCanvas.height = 4 * BLOCK_SIZE;
-
-// Create empty board
-function createBoard() {
-    return Array.from({ length: ROWS }, () => Array(COLS).fill(null));
-}
-
-// Get random tetromino
-function getRandomTetromino() {
-    const name = TETROMINO_NAMES[Math.floor(Math.random() * TETROMINO_NAMES.length)];
-    const tetromino = TETROMINOES[name];
-    return {
-        shape: tetromino.shape.map(row => [...row]),
-        color: tetromino.color,
-        x: Math.floor((COLS - tetromino.shape[0].length) / 2),
-        y: 0
-    };
-}
-
-// Rotate matrix clockwise
-function rotateMatrix(matrix) {
-    const rows = matrix.length;
-    const cols = matrix[0].length;
-    const rotated = Array.from({ length: cols }, () => Array(rows).fill(0));
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            rotated[c][rows - 1 - r] = matrix[r][c];
-        }
+// Shuffle an array in place (Fisher-Yates)
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
     }
-    return rotated;
+    return arr;
 }
 
-// Check collision
-function checkCollision(piece, offsetX = 0, offsetY = 0) {
-    for (let r = 0; r < piece.shape.length; r++) {
-        for (let c = 0; c < piece.shape[r].length; c++) {
-            if (piece.shape[r][c]) {
-                const newX = piece.x + c + offsetX;
-                const newY = piece.y + r + offsetY;
-                if (newX < 0 || newX >= COLS || newY >= ROWS) {
-                    return true;
-                }
-                if (newY >= 0 && board[newY][newX]) {
-                    return true;
-                }
+// Check if a tile is "free" (can be selected)
+// A tile is free if:
+// 1. Nothing is on top of it (no tile on a higher layer overlapping it)
+// 2. At least one side (left or right) is open (no adjacent tile on the same layer)
+function isTileFree(tile) {
+    if (tile.removed) return false;
+
+    const activeTiles = tiles.filter(t => !t.removed && t !== tile);
+
+    // Check if anything is on top — a tile on a higher layer overlaps if
+    // its position is close enough to cover this tile
+    for (const t of activeTiles) {
+        if (t.layer > tile.layer) {
+            // Tiles overlap if their row and column ranges intersect
+            // Each tile occupies roughly 2 units in each direction
+            if (Math.abs(t.r - tile.r) < 2 && Math.abs(t.c - tile.c) < 2) {
+                return false;
             }
         }
     }
-    return false;
+
+    // Check left/right neighbors on the same layer
+    let blockedLeft = false;
+    let blockedRight = false;
+
+    for (const t of activeTiles) {
+        if (t.layer === tile.layer && Math.abs(t.r - tile.r) < 2) {
+            const dc = t.c - tile.c;
+            if (dc >= 1.5 && dc <= 2.5) blockedRight = true;
+            if (dc <= -1.5 && dc >= -2.5) blockedLeft = true;
+        }
+    }
+
+    return !blockedLeft || !blockedRight;
 }
 
-// Lock piece to board
-function lockPiece() {
-    for (let r = 0; r < currentPiece.shape.length; r++) {
-        for (let c = 0; c < currentPiece.shape[r].length; c++) {
-            if (currentPiece.shape[r][c]) {
-                const y = currentPiece.y + r;
-                const x = currentPiece.x + c;
-                if (y >= 0) {
-                    board[y][x] = currentPiece.color;
-                }
+// Check if two tiles match
+function tilesMatch(a, b) {
+    return a.matchGroup === b.matchGroup && a.id !== b.id;
+}
+
+// Find all available matches
+function findAvailableMatches() {
+    const freeTiles = tiles.filter(t => !t.removed && isTileFree(t));
+    const matches = [];
+
+    for (let i = 0; i < freeTiles.length; i++) {
+        for (let j = i + 1; j < freeTiles.length; j++) {
+            if (tilesMatch(freeTiles[i], freeTiles[j])) {
+                matches.push([freeTiles[i], freeTiles[j]]);
             }
         }
     }
+
+    return matches;
 }
 
-// Clear completed lines
-function clearLines() {
-    let clearedLines = 0;
-    for (let r = ROWS - 1; r >= 0; r--) {
-        if (board[r].every(cell => cell !== null)) {
-            board.splice(r, 1);
-            board.unshift(Array(COLS).fill(null));
-            clearedLines++;
-            r++;
+// Calculate tile sizes and scale based on available space
+function calculateLayout() {
+    const boardArea = document.querySelector('.game-board-area');
+    const availW = boardArea.clientWidth - 16;
+    const availH = boardArea.clientHeight - 16;
+
+    // Find bounds of the layout
+    let maxR = 0, maxC = 0;
+    for (const t of tiles) {
+        if (!t.removed) {
+            if (t.r > maxR) maxR = t.r;
+            if (t.c > maxC) maxC = t.c;
         }
     }
 
-    if (clearedLines > 0) {
-        const points = [0, 100, 300, 500, 800];
-        score += points[clearedLines] * level;
-        lines += clearedLines;
+    // Each tile occupies 2 units. Add some padding for layer offset
+    const gridCols = maxC + 2 + 2; // +2 for tile width, +2 for layer offsets
+    const gridRows = maxR + 2 + 2;
 
-        // Level up every 10 lines
-        const newLevel = Math.floor(lines / 10) + 1;
-        if (newLevel > level) {
-            level = newLevel;
-            dropInterval = Math.max(100, 1000 - (level - 1) * 100);
-        }
+    // Calculate tile size to fit
+    const baseTileW = availW / gridCols * 2;
+    const baseTileH = availH / gridRows * 2;
 
-        updateUI();
+    // Maintain aspect ratio ~0.78 (w:h)
+    let tileW = Math.min(baseTileW, baseTileH * 0.78);
+    let tileH = tileW / 0.78;
+
+    // Clamp
+    tileW = Math.max(24, Math.min(tileW, 48));
+    tileH = tileW / 0.78;
+
+    return { tileW, tileH, gridCols, gridRows };
+}
+
+// Render all tiles to the board
+function renderBoard() {
+    boardEl.innerHTML = '';
+
+    const { tileW, tileH, gridCols, gridRows } = calculateLayout();
+
+    // Set CSS variables for tile size
+    const fontSize = Math.max(12, Math.floor(tileW * 0.55));
+    document.documentElement.style.setProperty('--tile-w', tileW + 'px');
+    document.documentElement.style.setProperty('--tile-h', tileH + 'px');
+    document.documentElement.style.setProperty('--tile-font', fontSize + 'px');
+
+    // Layer offset for 3D effect
+    const layerOffsetX = Math.max(2, tileW * 0.08);
+    const layerOffsetY = Math.max(2, tileH * 0.08);
+
+    // Calculate board dimensions
+    const boardW = (gridCols / 2) * tileW + 4 * layerOffsetX + 10;
+    const boardH = (gridRows / 2) * tileH + 4 * layerOffsetY + 10;
+    boardEl.style.width = boardW + 'px';
+    boardEl.style.height = boardH + 'px';
+
+    // Sort tiles by layer (draw bottom layers first) then by position
+    const sortedTiles = [...tiles]
+        .filter(t => !t.removed)
+        .sort((a, b) => {
+            if (a.layer !== b.layer) return a.layer - b.layer;
+            if (a.r !== b.r) return a.r - b.r;
+            return a.c - b.c;
+        });
+
+    for (const tile of sortedTiles) {
+        const el = document.createElement('div');
+        el.className = 'mahjong-tile';
+        el.dataset.id = tile.id;
+
+        // Position: each grid unit = half tile
+        const x = (tile.c / 2) * tileW + tile.layer * layerOffsetX;
+        const y = (tile.r / 2) * tileH + tile.layer * layerOffsetY;
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.zIndex = tile.layer * 100 + Math.floor(tile.r) * 10;
+
+        // 3D depth sides
+        const sideRight = document.createElement('div');
+        sideRight.className = 'tile-side-right';
+        el.appendChild(sideRight);
+
+        const sideBottom = document.createElement('div');
+        sideBottom.className = 'tile-side-bottom';
+        el.appendChild(sideBottom);
+
+        // Tile face
+        const face = document.createElement('div');
+        face.className = 'tile-face';
+        face.textContent = tile.face;
+        el.appendChild(face);
+
+        // Mark free/blocked
+        const free = isTileFree(tile);
+        el.classList.add(free ? 'free' : 'blocked');
+
+        // Click handler
+        el.addEventListener('click', () => onTileClick(tile));
+
+        boardEl.appendChild(el);
     }
 }
 
-// Update UI elements
-function updateUI() {
-    scoreEl.textContent = score;
-    levelEl.textContent = level;
-    linesEl.textContent = lines;
-}
+// Update the visual state of tiles (selected, free/blocked) without full re-render
+function updateTileStates() {
+    const tileEls = boardEl.querySelectorAll('.mahjong-tile');
+    for (const el of tileEls) {
+        const id = parseInt(el.dataset.id, 10);
+        const tile = tiles.find(t => t.id === id);
+        if (!tile || tile.removed) continue;
 
-// Draw block (retro 8-bit style with sharp beveled edges)
-function drawBlock(context, x, y, color, size = BLOCK_SIZE) {
-    const px = x * size;
-    const py = y * size;
-    const s = size;
-    const border = Math.max(2, Math.floor(s / 8));
-
-    // Main fill
-    context.fillStyle = color;
-    context.fillRect(px, py, s, s);
-
-    // Top-left highlight (lighter)
-    context.fillStyle = 'rgba(255, 255, 255, 0.45)';
-    context.fillRect(px, py, s, border);
-    context.fillRect(px, py, border, s);
-
-    // Bottom-right shadow (darker)
-    context.fillStyle = 'rgba(0, 0, 0, 0.45)';
-    context.fillRect(px, py + s - border, s, border);
-    context.fillRect(px + s - border, py, border, s);
-
-    // Inner dark outline
-    context.fillStyle = 'rgba(0, 0, 0, 0.15)';
-    context.fillRect(px + border, py + border, s - border * 2, s - border * 2);
-
-    // Inner bright center
-    context.fillStyle = color;
-    context.fillRect(px + border + 1, py + border + 1, s - border * 2 - 2, s - border * 2 - 2);
-}
-
-// Draw board
-function drawBoard() {
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Draw subtle grid dots (retro style)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-    for (let r = 1; r < ROWS; r++) {
-        for (let c = 1; c < COLS; c++) {
-            ctx.fillRect(c * BLOCK_SIZE - 1, r * BLOCK_SIZE - 1, 2, 2);
-        }
-    }
-
-    // Draw locked blocks
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            if (board[r][c]) {
-                drawBlock(ctx, c, r, board[r][c]);
-            }
-        }
+        const free = isTileFree(tile);
+        el.classList.toggle('free', free);
+        el.classList.toggle('blocked', !free);
+        el.classList.toggle('selected', selectedTile === tile);
     }
 }
 
-// Draw current piece
-function drawPiece() {
-    if (!currentPiece) return;
+// Handle tile click
+function onTileClick(tile) {
+    if (!gameRunning || tile.removed) return;
+    if (!isTileFree(tile)) return;
 
-    // Draw ghost piece
-    let ghostY = currentPiece.y;
-    while (!checkCollision(currentPiece, 0, ghostY - currentPiece.y + 1)) {
-        ghostY++;
+    clearHints();
+
+    if (selectedTile === null) {
+        selectedTile = tile;
+        updateTileStates();
+        return;
     }
 
-    ctx.globalAlpha = 0.3;
-    for (let r = 0; r < currentPiece.shape.length; r++) {
-        for (let c = 0; c < currentPiece.shape[r].length; c++) {
-            if (currentPiece.shape[r][c]) {
-                drawBlock(ctx, currentPiece.x + c, ghostY + r, currentPiece.color);
-            }
-        }
+    if (selectedTile.id === tile.id) {
+        selectedTile = null;
+        updateTileStates();
+        return;
     }
-    ctx.globalAlpha = 1;
 
-    // Draw actual piece
-    for (let r = 0; r < currentPiece.shape.length; r++) {
-        for (let c = 0; c < currentPiece.shape[r].length; c++) {
-            if (currentPiece.shape[r][c]) {
-                drawBlock(ctx, currentPiece.x + c, currentPiece.y + r, currentPiece.color);
-            }
-        }
-    }
-}
-
-// Draw next piece preview
-function drawNextPiece() {
-    nextCtx.fillStyle = '#111';
-    nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
-
-    if (!nextPiece) return;
-
-    const offsetX = (4 - nextPiece.shape[0].length) / 2;
-    const offsetY = (4 - nextPiece.shape.length) / 2;
-
-    for (let r = 0; r < nextPiece.shape.length; r++) {
-        for (let c = 0; c < nextPiece.shape[r].length; c++) {
-            if (nextPiece.shape[r][c]) {
-                drawBlock(nextCtx, offsetX + c, offsetY + r, nextPiece.color);
-            }
-        }
+    // Check match
+    if (tilesMatch(selectedTile, tile)) {
+        removePair(selectedTile, tile);
+        selectedTile = null;
+    } else {
+        // No match — select new tile
+        selectedTile = tile;
+        updateTileStates();
     }
 }
 
-// Move piece
-function movePiece(dx, dy) {
-    if (!gameRunning || !currentPiece) return;
+// Remove a matched pair with animation
+function removePair(a, b) {
+    a.removed = true;
+    b.removed = true;
+    moves++;
+    score += 100;
 
-    if (!checkCollision(currentPiece, dx, dy)) {
-        currentPiece.x += dx;
-        currentPiece.y += dy;
-    } else if (dy > 0) {
-        lockPiece();
-        clearLines();
-        spawnPiece();
-    }
-}
+    // Animate removal
+    const elA = boardEl.querySelector(`[data-id="${a.id}"]`);
+    const elB = boardEl.querySelector(`[data-id="${b.id}"]`);
 
-// Rotate piece
-function rotatePiece() {
-    if (!gameRunning || !currentPiece) return;
+    if (elA) elA.classList.add('matched');
+    if (elB) elB.classList.add('matched');
 
-    const rotated = rotateMatrix(currentPiece.shape);
-    const originalShape = currentPiece.shape;
-    currentPiece.shape = rotated;
-
-    // Wall kick
-    const kicks = [0, -1, 1, -2, 2];
-    let kicked = false;
-    for (const kick of kicks) {
-        if (!checkCollision(currentPiece, kick, 0)) {
-            currentPiece.x += kick;
-            kicked = true;
-            break;
-        }
-    }
-
-    if (!kicked) {
-        currentPiece.shape = originalShape;
-    }
-}
-
-// Hard drop
-function hardDrop() {
-    if (!gameRunning || !currentPiece) return;
-
-    while (!checkCollision(currentPiece, 0, 1)) {
-        currentPiece.y++;
-        score += 2;
-    }
-
-    lockPiece();
-    clearLines();
-    spawnPiece();
     updateUI();
+
+    setTimeout(() => {
+        if (elA) elA.remove();
+        if (elB) elB.remove();
+        updateTileStates();
+        checkGameState();
+    }, 300);
 }
 
-// Spawn new piece
-function spawnPiece() {
-    currentPiece = nextPiece || getRandomTetromino();
-    nextPiece = getRandomTetromino();
+// Update UI counters
+function updateUI() {
+    const remaining = tiles.filter(t => !t.removed).length;
+    tilesLeftEl.textContent = remaining;
+    movesEl.textContent = moves;
+    scoreEl.textContent = score;
+}
 
-    // Check game over
-    if (checkCollision(currentPiece, 0, 0)) {
-        endGame();
+// Check if game is won or stuck
+function checkGameState() {
+    const remaining = tiles.filter(t => !t.removed).length;
+
+    if (remaining === 0) {
+        gameRunning = false;
+        score += 1000; // Bonus for winning
+        updateUI();
+        overlayTitle.innerHTML = colorizeTitle('YOU WIN');
+        overlayMessage.textContent = `Score: ${score} | Moves: ${moves}`;
+        startBtn.textContent = 'Play again';
+        overlay.classList.remove('hidden');
+        return;
     }
 
-    drawNextPiece();
+    const matches = findAvailableMatches();
+    if (matches.length === 0) {
+        // No moves available — game stuck
+        gameRunning = false;
+        overlayTitle.innerHTML = colorizeTitle('NO MOVES');
+        overlayMessage.textContent = `No more matches available. Score: ${score}`;
+        startBtn.textContent = 'New game';
+        overlay.classList.remove('hidden');
+    }
 }
 
-// Start game
+// Hint: highlight one available pair
+function showHint() {
+    if (!gameRunning) return;
+
+    clearHints();
+    const matches = findAvailableMatches();
+    if (matches.length === 0) return;
+
+    const [a, b] = matches[0];
+    const elA = boardEl.querySelector(`[data-id="${a.id}"]`);
+    const elB = boardEl.querySelector(`[data-id="${b.id}"]`);
+
+    if (elA) elA.classList.add('hint');
+    if (elB) elB.classList.add('hint');
+
+    // Deduct points for using hint
+    score = Math.max(0, score - 25);
+    updateUI();
+
+    hintTimeout = setTimeout(clearHints, 2000);
+}
+
+// Clear hint highlights
+function clearHints() {
+    if (hintTimeout) {
+        clearTimeout(hintTimeout);
+        hintTimeout = null;
+    }
+    const hinted = boardEl.querySelectorAll('.hint');
+    for (const el of hinted) {
+        el.classList.remove('hint');
+    }
+}
+
+// Shuffle remaining tiles' faces (keep positions, reassign tile faces)
+function shuffleTiles() {
+    if (!gameRunning) return;
+
+    const active = tiles.filter(t => !t.removed);
+    const faces = active.map(t => ({ face: t.face, matchGroup: t.matchGroup }));
+    shuffle(faces);
+
+    for (let i = 0; i < active.length; i++) {
+        active[i].face = faces[i].face;
+        active[i].matchGroup = faces[i].matchGroup;
+    }
+
+    selectedTile = null;
+    score = Math.max(0, score - 50);
+    updateUI();
+    renderBoard();
+}
+
+// Start a new game
 function startGame() {
-    board = createBoard();
+    const tileSet = buildTileSet();
+    shuffle(tileSet);
+
+    const positions = getTurtleLayout();
+
+    tiles = [];
+    for (let i = 0; i < positions.length; i++) {
+        const pos = positions[i];
+        const tileData = tileSet[i];
+        tiles.push({
+            id: tileData.id,
+            face: tileData.face,
+            matchGroup: tileData.matchGroup,
+            layer: pos.layer,
+            r: pos.r,
+            c: pos.c,
+            removed: false,
+        });
+    }
+
+    selectedTile = null;
     score = 0;
-    level = 1;
-    lines = 0;
-    dropInterval = 1000;
-    gameOver = false;
+    moves = 0;
     gameRunning = true;
 
     updateUI();
-
-    nextPiece = getRandomTetromino();
-    spawnPiece();
-
+    renderBoard();
     overlay.classList.add('hidden');
-
-    lastTime = performance.now();
-    requestAnimationFrame(gameLoop);
-}
-
-// End game
-function endGame() {
-    gameRunning = false;
-    gameOver = true;
-
-    overlayTitle.innerHTML = colorizeTitle('GAME OVER');
-    overlayMessage.textContent = `Score: ${score}`;
-    startBtn.textContent = 'Play again';
-    overlay.classList.remove('hidden');
-}
-
-// Game loop
-function gameLoop(timestamp) {
-    if (!gameRunning) return;
-
-    const deltaTime = timestamp - lastTime;
-    lastTime = timestamp;
-    dropCounter += deltaTime;
-
-    if (dropCounter >= dropInterval) {
-        movePiece(0, 1);
-        dropCounter = 0;
-    }
-
-    drawBoard();
-    drawPiece();
-
-    requestAnimationFrame(gameLoop);
 }
 
 // Event listeners
 startBtn.addEventListener('click', startGame);
+hintBtn.addEventListener('click', showHint);
+shuffleBtn.addEventListener('click', shuffleTiles);
 
-// Touch controls
-btnLeft.addEventListener('click', () => movePiece(-1, 0));
-btnRight.addEventListener('click', () => movePiece(1, 0));
-btnDown.addEventListener('click', () => movePiece(0, 1));
-btnRotate.addEventListener('click', rotatePiece);
-btnDrop.addEventListener('click', hardDrop);
-
-// Keyboard controls
-document.addEventListener('keydown', (e) => {
-    // Prevent scrolling for game keys
-    const gameKeys = ['ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', ' ', 'a', 'A', 'd', 'D', 's', 'S', 'w', 'W'];
-    if (gameKeys.includes(e.key)) {
-        e.preventDefault();
-    }
-
-    if (!gameRunning) {
-        if (e.key === 'Enter' || e.key === ' ') {
-            startGame();
-        }
-        return;
-    }
-
-    switch (e.key) {
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-            movePiece(-1, 0);
-            break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-            movePiece(1, 0);
-            break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-            movePiece(0, 1);
-            score += 1;
-            updateUI();
-            break;
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-            rotatePiece();
-            break;
-        case ' ':
-            hardDrop();
-            break;
-    }
-});
-
-// Prevent scrolling on touch devices
+// Prevent scrolling on touch
 document.addEventListener('touchmove', (e) => {
     if (gameRunning) {
         e.preventDefault();
     }
 }, { passive: false });
 
-// Initial draw
-drawBoard();
-drawNextPiece();
+// Handle window resize — re-render the board
+window.addEventListener('resize', () => {
+    if (gameRunning && tiles.length > 0) {
+        renderBoard();
+    }
+});
