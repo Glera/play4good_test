@@ -503,7 +503,7 @@ function renderBoard(animate) {
             el.style.setProperty('--fly-in-x', flyInX + 'px');
             el.style.setProperty('--fly-in-y', flyInY + 'px');
             // Stagger: bottom layers first, then upper layers
-            const delay = (tile.layer * 150) + (idx * 3) + Math.random() * 100;
+            const delay = (tile.layer * 300) + (idx * 6) + Math.random() * 200;
             el.style.animationDelay = delay + 'ms';
             el.classList.add('fly-in');
         }
