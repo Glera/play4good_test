@@ -1,3 +1,4 @@
+// Mahjong Solitaire — Telegram Mini App
 // Initialize Telegram WebApp
 const tg = window.Telegram.WebApp;
 tg.ready();
