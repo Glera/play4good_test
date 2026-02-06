@@ -284,8 +284,8 @@ function applyZoom() {
 // Calculate tile sizes and scale based on available space
 function calculateLayout() {
     const boardArea = document.querySelector('.game-board-area');
-    const availW = boardArea.clientWidth - 8;
-    const availH = boardArea.clientHeight - 8;
+    const availW = boardArea.clientWidth - 4;
+    const availH = boardArea.clientHeight - 4;
 
     // Find bounds of the layout
     let maxR = 0, maxC = 0;
@@ -304,13 +304,13 @@ function calculateLayout() {
     const baseTileW = availW / gridCols * 2;
     const baseTileH = availH / gridRows * 2;
 
-    // Maintain aspect ratio ~0.78 (w:h)
-    let tileW = Math.min(baseTileW, baseTileH * 0.78);
-    let tileH = tileW / 0.78;
+    // Maintain aspect ratio ~0.85 (w:h) — more square for better readability
+    let tileW = Math.min(baseTileW, baseTileH * 0.85);
+    let tileH = tileW / 0.85;
 
-    // Clamp
-    tileW = Math.max(24, Math.min(tileW, 52));
-    tileH = tileW / 0.78;
+    // Clamp — allow larger tiles for bigger screens
+    tileW = Math.max(24, Math.min(tileW, 60));
+    tileH = tileW / 0.85;
 
     return { tileW, tileH, gridCols, gridRows };
 }
@@ -322,14 +322,14 @@ function renderBoard() {
     const { tileW, tileH, gridCols, gridRows } = calculateLayout();
 
     // Set CSS variables for tile size
-    const fontSize = Math.max(14, Math.floor(tileW * 0.55));
+    const fontSize = Math.max(16, Math.floor(tileW * 0.75));
     document.documentElement.style.setProperty('--tile-w', tileW + 'px');
     document.documentElement.style.setProperty('--tile-h', tileH + 'px');
     document.documentElement.style.setProperty('--tile-font', fontSize + 'px');
 
     // Layer offset for 3D effect
-    const layerOffsetX = Math.max(3, tileW * 0.09);
-    const layerOffsetY = Math.max(3, tileH * 0.09);
+    const layerOffsetX = Math.max(2, tileW * 0.05);
+    const layerOffsetY = Math.max(2, tileH * 0.05);
 
     // Calculate board dimensions
     const boardW = (gridCols / 2) * tileW + 4 * layerOffsetX + 10;
@@ -353,11 +353,6 @@ function renderBoard() {
         const el = document.createElement('div');
         el.className = 'mahjong-tile';
         el.dataset.id = tile.id;
-
-        // Add gold class for tiles on upper layers (layer 2+)
-        if (tile.layer >= 2) {
-            el.classList.add('layer-top');
-        }
 
         // Position: each grid unit = half tile
         const x = (tile.c / 2) * tileW + tile.layer * layerOffsetX;

@@ -95,7 +95,7 @@ body {
     justify-content: center;
     overflow: hidden;
     min-height: 0;
-    padding: 4px;
+    padding: 2px;
 }
 
 .mahjong-board {
@@ -137,51 +137,32 @@ body {
 
 .tile-side-right {
     position: absolute;
-    top: 3px;
-    right: -4px;
-    width: 4px;
+    top: 2px;
+    right: -2px;
+    width: 2px;
     height: 100%;
     background: linear-gradient(180deg, #b8a882 0%, #9a8868 100%);
-    border-radius: 0 4px 4px 0;
+    border-radius: 0 2px 2px 0;
 }
 
 .tile-side-bottom {
     position: absolute;
-    bottom: -4px;
-    left: 3px;
+    bottom: -2px;
+    left: 2px;
     width: 100%;
-    height: 4px;
+    height: 2px;
     background: linear-gradient(90deg, #a89670 0%, #8a7a5a 100%);
-    border-radius: 0 0 4px 4px;
+    border-radius: 0 0 2px 2px;
 }
 
 .tile-corner {
     position: absolute;
-    bottom: -4px;
-    right: -4px;
-    width: 4px;
-    height: 4px;
+    bottom: -2px;
+    right: -2px;
+    width: 2px;
+    height: 2px;
     background: #8a7a5a;
-    border-radius: 0 0 4px 0;
-}
-
-/* Upper layer tiles get gold/yellow tint */
-.mahjong-tile.layer-top .tile-face {
-    background: linear-gradient(145deg, #ffe066 0%, #f5c842 50%, #e0a820 100%);
-    border-color: #c4982a;
-    color: #5a4000;
-}
-
-.mahjong-tile.layer-top .tile-side-right {
-    background: linear-gradient(180deg, #c49a30 0%, #a07818 100%);
-}
-
-.mahjong-tile.layer-top .tile-side-bottom {
-    background: linear-gradient(90deg, #b08820 0%, #907010 100%);
-}
-
-.mahjong-tile.layer-top .tile-corner {
-    background: #907010;
+    border-radius: 0 0 2px 0;
 }
 
 /* Tile states */
