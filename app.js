@@ -527,12 +527,8 @@ function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDo
         const inv = 1 - t;
         const x = inv * inv * startX + 2 * inv * t * ctrlX + t * t * endX;
         const y = inv * inv * startY + 2 * inv * t * ctrlY + t * t * endY;
-        const scale = 1 - t * 0.6; // shrink as they approach
-        const opacity = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
         el.style.left = x + 'px';
         el.style.top = y + 'px';
-        el.style.transform = `scale(${scale})`;
-        el.style.opacity = opacity;
         if (t < 1) {
             requestAnimationFrame(step);
         } else if (onDone) {
