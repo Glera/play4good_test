@@ -683,16 +683,19 @@ function removePair(a, b) {
             createParticles(midX + tileW / 2, midY + tileH / 2);
             if (elA) elA.remove();
             if (elB) elB.remove();
-            updateTileStates();
             applyZoom();
             checkGameState();
         }
     }
 
+    // Update tile states immediately so that tiles freed by this removal
+    // become available (clickable) at the start of the fly animation,
+    // not after it finishes
+    updateTileStates();
+    updateUI();
+
     animateArc(elA, ax, ay, ctrlAx, ctrlAy, midX, midY, duration, onFinish);
     animateArc(elB, bx, by, ctrlBx, ctrlBy, midX, midY, duration, onFinish);
-
-    updateUI();
 }
 
 // Update UI counters
