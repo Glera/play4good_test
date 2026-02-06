@@ -158,10 +158,10 @@ body {
     transform: translateY(-8%) translateZ(0);
 }
 
-/* Flowers and seasons are image-like emojis — render taller, so scale down and center */
+/* Flowers and seasons are image-like emojis — render taller, so scale slightly and center */
 .tile-face-content.tile-face-image {
-    font-size: calc(var(--tile-font, 20px) * 0.78);
-    transform: translateY(-2%) translateZ(0);
+    font-size: calc(var(--tile-font, 20px) * 0.92);
+    transform: translateY(-8%) translateZ(0);
 }
 
 /* Tile states */
