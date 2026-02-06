@@ -118,6 +118,18 @@ jobs:
             echo "⚠️ notify.sh not found — Claude won't be able to send messages"
           fi
 
+      # 9. Отправляем план в Telegram ДО запуска Claude
+      - name: Notify — Claude starting task
+        continue-on-error: true
+        env:
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          if [ -f "./notify.sh" ]; then
+            ./notify.sh info "Claude приступает к задаче: ${{ steps.dev.outputs.issue_title }}"
+          fi
+
       # 9. Готовим промпт из issue
       - name: Prepare prompt
         id: prompt
@@ -132,29 +144,28 @@ jobs:
 
           TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
 
-          COMMUNICATION:
-          You have ./notify.sh script to send messages to the developer in Telegram.
-          Usage: ./notify.sh <type> <message>
-          Types: plan, progress, question, done, error, info
+          ⚠️ MANDATORY FIRST STEP — BEFORE ANYTHING ELSE, RUN THIS COMMAND:
+          ./notify.sh plan "Your 1-2 sentence plan describing what you will change"
 
-          FIRST: Send your work plan:
-          ./notify.sh plan "Your plan here..."
+          This sends a message to the developer in Telegram. You MUST do this first.
 
-          Steps:
-          1. Read CLAUDE.md in repo root if it exists
-          2. Send your plan via ./notify.sh plan "..."
-          3. Look at relevant source files
-          4. Implement the requested changes
-          5. Stage all changes: git add -A
-          6. Commit: git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
-          7. Push: git push origin ${BRANCH}
+          WORKFLOW:
+          1. Run: ./notify.sh plan "Your plan here"
+          2. Read CLAUDE.md if it exists
+          3. Look at relevant source files  
+          4. Implement the changes
+          5. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})" && git push origin ${BRANCH}
 
-          Rules:
-          - Stay on current branch (${BRANCH}), do NOT create new branches
+          COMMUNICATION (use ./notify.sh anytime):
+          - ./notify.sh plan "..." — your plan (REQUIRED at start)
+          - ./notify.sh progress "..." — progress update
+          - ./notify.sh error "..." — if you find a problem
+          - ./notify.sh info "..." — interesting findings
+
+          RULES:
+          - Stay on branch ${BRANCH}, do NOT create new branches
           - Make clean, focused changes
-          - Always commit and push when done
-          - Do NOT loop or redo work — once pushed, you are DONE
-          - Use ./notify.sh to communicate progress or issues
+          - Once pushed, you are DONE — do not loop
           PROMPT_EOF
 
           echo "✅ Prompt ready for issue #${ISSUE_NUM} on branch ${BRANCH}"
@@ -174,6 +185,11 @@ jobs:
           GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           set +e
+          # Export vars for notify.sh called by Claude
+          export ISSUE_NUMBER="${{ steps.dev.outputs.issue_number }}"
+          export BOT_NOTIFY_URL="${{ secrets.BOT_WEBHOOK_URL }}"
+          export GITHUB_HEAD_REF="${{ steps.dev.outputs.branch }}"
+          
           echo "🧠 Running Claude Code (Opus)..."
           claude -p --dangerously-skip-permissions \
             --model claude-opus-4-6 \
