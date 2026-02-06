@@ -610,7 +610,7 @@ function createParticles(x, y) {
 function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDone) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
-    el.style.zIndex = 9998;
+    el.style.zIndex = 10000;
     // Use transform instead of left/top for GPU-accelerated animation
     el.style.willChange = 'transform';
 
@@ -652,6 +652,10 @@ function removePair(a, b) {
         return;
     }
 
+    // Elevate flying tiles above all other tiles (highest z-index)
+    elA.style.zIndex = 10000;
+    elB.style.zIndex = 10000;
+
     // Get current positions (top-left corner of each tile)
     const ax = parseFloat(elA.style.left);
     const ay = parseFloat(elA.style.top);
@@ -672,25 +676,16 @@ function removePair(a, b) {
     const dy = bCy - aCy;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Meeting point: both tiles land on the same horizontal line (same Y).
-    // Use the average Y of both tiles as the shared horizontal line.
-    // X meeting point is the midpoint between the two tiles.
+    // Meeting point: both tiles fly to the exact same center point and overlap
+    // before disappearing, creating a collision effect.
     const meetX = (aCx + bCx) / 2;
     const meetY = (aCy + bCy) / 2;
 
-    // Final positions: tiles sit side by side on the same horizontal line,
-    // touching edge-to-edge. Tile A on the left, tile B on the right.
-    const halfW = tileW / 2;
-    const endACx = meetX - halfW;
-    const endACy = meetY;
-    const endBCx = meetX + halfW;
-    const endBCy = meetY;
-
-    // Convert back to top-left positions for animation
-    const endAx = endACx - tileW / 2;
-    const endAy = endACy - tileH / 2;
-    const endBx = endBCx - tileW / 2;
-    const endBy = endBCy - tileH / 2;
+    // Both tiles fly to the same meeting point (they overlap at the end)
+    const endAx = meetX - tileW / 2;
+    const endAy = meetY - tileH / 2;
+    const endBx = meetX - tileW / 2;
+    const endBy = meetY - tileH / 2;
 
     // Arc trajectory: tiles should NOT fly over each other.
     // Determine how "vertical" the arrangement is to decide arc direction.
