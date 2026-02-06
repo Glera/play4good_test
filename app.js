@@ -142,6 +142,7 @@ let moves = 0;
 let gameRunning = false;
 let hintTimeout = null;
 let maxLayer = 3; // Maximum layer in current layout
+let lastRenderedLayout = null; // Store layout from last renderBoard call
 
 // DOM elements
 const boardEl = document.getElementById('game-board');
@@ -232,12 +233,13 @@ function getActiveMaxLayer() {
     return maxL;
 }
 
-// Calculate zoom scale: only zoom when remaining tiles leave enough margin
-function calculateZoomScale() {
+// Calculate zoom: scale and translate to center remaining tiles in view
+function calculateZoom() {
     const activeTiles = tiles.filter(t => !t.removed);
-    if (activeTiles.length === 0) return 1;
+    if (activeTiles.length === 0) return { scale: 1, translateX: 0, translateY: 0 };
 
-    const { tileW, tileH } = calculateLayout();
+    // Use stored layout from last renderBoard call to match actual tile positions
+    const { tileW, tileH } = lastRenderedLayout || calculateLayout();
     const layerOffsetX = Math.max(2, tileW * 0.05);
     const layerOffsetY = Math.max(2, tileH * 0.05);
 
@@ -254,11 +256,8 @@ function calculateZoomScale() {
 
     const contentW = maxX - minX;
     const contentH = maxY - minY;
-    if (contentW <= 0 || contentH <= 0) return 1;
+    if (contentW <= 0 || contentH <= 0) return { scale: 1, translateX: 0, translateY: 0 };
 
-    // The board element is larger than the content (full grid).
-    // When we scale the board, the entire board element grows from center.
-    // We need: boardW * scale <= availW and boardH * scale <= availH
     const boardW = parseFloat(boardEl.style.width) || 1;
     const boardH = parseFloat(boardEl.style.height) || 1;
 
@@ -266,21 +265,32 @@ function calculateZoomScale() {
     const availW = boardArea.clientWidth - 4;
     const availH = boardArea.clientHeight - 4;
 
-    // Maximum scale so scaled board still fits in container
-    const maxScale = Math.min(availW / boardW, availH / boardH);
-
-    // Desired scale: fit the remaining content bounding box to the available area
+    // Desired scale: fit the remaining content to the available area
     const desiredScale = Math.min(availW / contentW, availH / contentH) * 0.92;
 
-    // Clamp: never shrink below 1.0, never exceed container fit, cap at 1.5x
-    const scale = Math.min(desiredScale, maxScale, 1.5);
-    return Math.max(scale, 1);
+    // Clamp: never shrink below 1.0, cap at 2.0x
+    const scale = Math.max(Math.min(desiredScale, 2.0), 1);
+
+    // Calculate translation to center the content bounding box in the container.
+    // The board is flexbox-centered, so the board center is at the container center.
+    // After scaling from board center, the content center shifts.
+    // We need to translate so the content center appears at the container center.
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+    const boardCenterX = boardW / 2;
+    const boardCenterY = boardH / 2;
+
+    // Offset from board center to content center (in board coordinates)
+    const offsetX = boardCenterX - contentCenterX;
+    const offsetY = boardCenterY - contentCenterY;
+
+    return { scale, translateX: offsetX, translateY: offsetY };
 }
 
 // Apply zoom to the board
 function applyZoom() {
-    const scale = calculateZoomScale();
-    boardEl.style.transform = `scale(${scale})`;
+    const { scale, translateX, translateY } = calculateZoom();
+    boardEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
 }
 
 // Calculate tile sizes and scale based on available space
@@ -339,6 +349,7 @@ function renderBoard(animate) {
     boardEl.innerHTML = '';
 
     const { tileW, tileH, gridCols, gridRows } = calculateLayout();
+    lastRenderedLayout = { tileW, tileH, gridCols, gridRows };
 
     // Set CSS variables for tile size
     const fontSize = Math.max(16, Math.floor(tileW * 0.92));
