@@ -708,6 +708,74 @@ function clearHints() {
     }
 }
 
+// Generate a solvable face assignment for a reshuffle (same logic as generateSolvableLayout
+// but works with an existing set of faces/matchGroups instead of building a new tile set)
+function generateSolvableShuffleLayout(positions, faces) {
+    // Group faces into pairs by matchGroup
+    const pairGroups = {};
+    for (const f of faces) {
+        if (!pairGroups[f.matchGroup]) pairGroups[f.matchGroup] = [];
+        pairGroups[f.matchGroup].push(f);
+    }
+
+    const pairs = [];
+    for (const group of Object.values(pairGroups)) {
+        shuffle(group);
+        for (let i = 0; i < group.length; i += 2) {
+            pairs.push([group[i], group[i + 1]]);
+        }
+    }
+    shuffle(pairs);
+
+    // All positions start as occupied
+    const occupied = positions.map(p => ({ ...p }));
+    const assignment = new Array(positions.length).fill(null);
+
+    let pairIndex = 0;
+
+    // Repeatedly find free positions and assign pairs (reverse placement)
+    while (pairIndex < pairs.length) {
+        const active = occupied.filter(Boolean);
+
+        const freeIndices = [];
+        for (let i = 0; i < occupied.length; i++) {
+            if (occupied[i] && isPositionFree(occupied[i], active)) {
+                freeIndices.push(i);
+            }
+        }
+
+        if (freeIndices.length < 2) {
+            break;
+        }
+
+        shuffle(freeIndices);
+
+        const idx1 = freeIndices[0];
+        const idx2 = freeIndices[1];
+
+        assignment[idx1] = pairs[pairIndex][0];
+        assignment[idx2] = pairs[pairIndex][1];
+
+        occupied[idx1] = null;
+        occupied[idx2] = null;
+
+        pairIndex++;
+    }
+
+    // Fallback: assign any remaining pairs to unassigned positions
+    const unassigned = [];
+    for (let i = 0; i < assignment.length; i++) {
+        if (!assignment[i]) unassigned.push(i);
+    }
+    while (pairIndex < pairs.length && unassigned.length >= 2) {
+        assignment[unassigned.pop()] = pairs[pairIndex][0];
+        assignment[unassigned.pop()] = pairs[pairIndex][1];
+        pairIndex++;
+    }
+
+    return assignment;
+}
+
 // Shuffle remaining tiles' faces (keep positions, reassign tile faces)
 // Animated: tiles fly out, faces reshuffle, tiles fly back in
 let shuffleInProgress = false;
@@ -776,9 +844,13 @@ function shuffleTiles() {
         const faces = active.map(t => ({ face: t.face, matchGroup: t.matchGroup }));
         shuffle(faces);
 
+        // Use reverse placement to guarantee solvability after shuffle
+        const positions = active.map(t => ({ layer: t.layer, r: t.r, c: t.c }));
+        const solvableAssignment = generateSolvableShuffleLayout(positions, faces);
+
         for (let i = 0; i < active.length; i++) {
-            active[i].face = faces[i].face;
-            active[i].matchGroup = faces[i].matchGroup;
+            active[i].face = solvableAssignment[i].face;
+            active[i].matchGroup = solvableAssignment[i].matchGroup;
         }
 
         score = Math.max(0, score - 50);
