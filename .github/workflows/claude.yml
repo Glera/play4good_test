@@ -11,13 +11,18 @@ permissions:
   id-token: write
 
 jobs:
-  claude:
+  # ============================================================
+  # JOB 1: Определяем ветку разработчика
+  # ============================================================
+  detect:
     if: github.event_name == 'issues'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    outputs:
+      branch: ${{ steps.dev.outputs.branch }}
+      dev_name: ${{ steps.dev.outputs.dev_name }}
+      issue_title: ${{ steps.dev.outputs.issue_title }}
+      issue_number: ${{ steps.dev.outputs.issue_number }}
     steps:
-      # 1. Определяем dev-ветку из лейбла
       - name: Detect developer branch
         id: dev
         uses: actions/github-script@v7
@@ -51,17 +56,32 @@ jobs:
             console.log(`Developer: ${devName || '(none)'}`);
             console.log(`Target branch: ${branch || 'main (default)'}`);
 
-      # 2. Checkout на dev-ветку
+  # ============================================================
+  # JOB 2: Основная работа Claude (с очередью по ветке)
+  # ============================================================
+  claude:
+    needs: detect
+    if: needs.detect.outputs.branch != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    # Очередь: тикеты одного разработчика выполняются последовательно
+    concurrency:
+      group: claude-${{ needs.detect.outputs.branch }}
+      cancel-in-progress: false
+
+    steps:
+      # 1. Checkout на dev-ветку
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ steps.dev.outputs.branch || 'main' }}
+          ref: ${{ needs.detect.outputs.branch || 'main' }}
 
       # 3. Создаём dev-ветку из main если её ещё нет
       - name: Ensure dev branch exists
-        if: steps.dev.outputs.branch != ''
+        if: needs.detect.outputs.branch != ''
         run: |
-          BRANCH="${{ steps.dev.outputs.branch }}"
+          BRANCH="${{ needs.detect.outputs.branch }}"
           if git ls-remote --heads origin "$BRANCH" | grep -q .; then
             echo "✅ Branch $BRANCH already exists"
           else
@@ -73,12 +93,12 @@ jobs:
 
       # 4. 🔔 Уведомление: Claude начал работу
       - name: Notify — Claude started
-        if: steps.dev.outputs.branch != ''
+        if: needs.detect.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"event\":\"claude_started\",\"branch\":\"${{ needs.detect.outputs.branch }}\",\"issue_number\":\"${{ needs.detect.outputs.issue_number }}\",\"issue_title\":\"${{ needs.detect.outputs.issue_title }}\"}"
 
       # 5. Настраиваем git + auth для push
       - name: Configure git
@@ -124,16 +144,16 @@ jobs:
       - name: Notify — Claude starting task
         continue-on-error: true
         env:
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          GITHUB_HEAD_REF: ${{ needs.detect.outputs.branch }}
         run: |
           echo "DEBUG: BOT_NOTIFY_URL is set: $( [ -n \"$BOT_NOTIFY_URL\" ] && echo 'yes' || echo 'no' )"
           echo "DEBUG: ISSUE_NUMBER=$ISSUE_NUMBER"
           echo "DEBUG: GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
           if [ -f "./notify.sh" ]; then
             echo "DEBUG: notify.sh exists, calling it..."
-            ./notify.sh info "Claude приступает к задаче: ${{ steps.dev.outputs.issue_title }}"
+            ./notify.sh info "Claude приступает к задаче: ${{ needs.detect.outputs.issue_title }}"
             echo "DEBUG: notify.sh exit code: $?"
           else
             echo "DEBUG: notify.sh NOT FOUND"
@@ -145,7 +165,7 @@ jobs:
         shell: bash
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
-          ISSUE_TITLE=$(echo "${{ steps.dev.outputs.issue_title }}" | sed 's/"/\\"/g')
+          ISSUE_TITLE=$(echo "${{ needs.detect.outputs.issue_title }}" | sed 's/"/\\"/g')
           BRANCH=$(git branch --show-current)
 
           cat > /tmp/claude-prompt.txt << PROMPT_EOF
@@ -181,15 +201,15 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          GITHUB_HEAD_REF: ${{ needs.detect.outputs.branch }}
         run: |
           set +e
           # Export vars for notify.sh called by Claude
-          export ISSUE_NUMBER="${{ steps.dev.outputs.issue_number }}"
+          export ISSUE_NUMBER="${{ needs.detect.outputs.issue_number }}"
           export BOT_NOTIFY_URL="${{ secrets.BOT_WEBHOOK_URL }}"
-          export GITHUB_HEAD_REF="${{ steps.dev.outputs.branch }}"
+          export GITHUB_HEAD_REF="${{ needs.detect.outputs.branch }}"
           
           echo "🧠 Running Claude Code (Opus)..."
           claude -p --dangerously-skip-permissions \
@@ -217,9 +237,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          GITHUB_HEAD_REF: ${{ needs.detect.outputs.branch }}
         run: |
           set +e
           echo "🔄 Continuing Opus session (+30 turns)..."
@@ -247,9 +267,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          GITHUB_HEAD_REF: ${{ needs.detect.outputs.branch }}
         run: |
           echo "🔄 Continuing Opus session (final +30 turns, total 110)..."
           claude -p --dangerously-skip-permissions \
@@ -289,9 +309,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          GITHUB_HEAD_REF: ${{ needs.detect.outputs.branch }}
         run: |
           echo "🧠 Retrying Claude Code (Opus)..."
           claude -p --dangerously-skip-permissions \
@@ -321,12 +341,12 @@ jobs:
           git clean -fd 2>/dev/null || true
 
       - name: Notify — switching to Sonnet
-        if: steps.need_sonnet.outputs.opus_ok == 'false' && steps.dev.outputs.branch != ''
+        if: steps.need_sonnet.outputs.opus_ok == 'false' && needs.detect.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"opus_unavailable\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"event\":\"opus_unavailable\",\"branch\":\"${{ needs.detect.outputs.branch }}\",\"issue_number\":\"${{ needs.detect.outputs.issue_number }}\",\"issue_title\":\"${{ needs.detect.outputs.issue_title }}\"}"
 
       - name: "Claude Code — Sonnet (fallback)"
         id: sonnet
@@ -335,9 +355,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          GITHUB_HEAD_REF: ${{ needs.detect.outputs.branch }}
         run: |
           set +e
           echo "🧠 Running Claude Code (Sonnet, fallback)..."
@@ -361,9 +381,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          GITHUB_HEAD_REF: ${{ needs.detect.outputs.branch }}
         run: |
           echo "🔄 Continuing Sonnet session (+30 turns)..."
           claude -p --dangerously-skip-permissions \
@@ -415,8 +435,8 @@ jobs:
           BRANCH=$(git branch --show-current)
           COMMIT_SHA="${{ steps.verify.outputs.commit_sha }}"
           COMMIT_SHORT="${{ steps.verify.outputs.commit_sha_short }}"
-          ISSUE_NUM="${{ steps.dev.outputs.issue_number }}"
-          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          ISSUE_NUM="${{ needs.detect.outputs.issue_number }}"
+          ISSUE_TITLE="${{ needs.detect.outputs.issue_title }}"
           TODAY=$(date +%Y-%m-%d)
           
           # Получаем список изменённых файлов
@@ -474,20 +494,20 @@ jobs:
       # УВЕДОМЛЕНИЯ (только на основе реального push!)
       # ============================================================
       - name: Notify — all attempts failed
-        if: steps.verify.outputs.pushed == 'false' && steps.dev.outputs.branch != ''
+        if: steps.verify.outputs.pushed == 'false' && needs.detect.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"event\":\"claude_failed\",\"branch\":\"${{ needs.detect.outputs.branch }}\",\"issue_number\":\"${{ needs.detect.outputs.issue_number }}\",\"issue_title\":\"${{ needs.detect.outputs.issue_title }}\"}"
 
       - name: Notify — changes pushed
-        if: steps.verify.outputs.pushed == 'true' && steps.dev.outputs.branch != ''
+        if: steps.verify.outputs.pushed == 'true' && needs.detect.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"merged\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"event\":\"merged\",\"branch\":\"${{ needs.detect.outputs.branch }}\",\"issue_number\":\"${{ needs.detect.outputs.issue_number }}\",\"issue_title\":\"${{ needs.detect.outputs.issue_title }}\"}"
 
       - name: Close issue
         if: steps.verify.outputs.pushed == 'true'
