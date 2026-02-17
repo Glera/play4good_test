@@ -391,37 +391,56 @@ jobs:
             "$(cat /tmp/fix-prompt.txt)"
 
       # ============================================================
-      # PHASE 5: E2E SMOKE TESTS
+      # PHASE 5: SMOKE TESTS + PERFORMANCE
       # ============================================================
 
-      - name: "Phase 5: Run smoke tests"
-        id: e2e
+      - name: "Phase 5a: Run smoke tests"
+        id: e2e_smoke
         continue-on-error: true
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
           if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
             echo "No changes — skipping tests"
-            echo "TESTS_OK=skip" >> "$GITHUB_ENV"
+            echo "SMOKE_OK=skip" >> "$GITHUB_ENV"
             exit 0
           fi
 
-          echo "=== Phase 5: Running Playwright smoke tests ==="
-          npx playwright test 2>&1 | tee /tmp/test-output.txt
+          echo "=== Phase 5a: Smoke tests ==="
+          npx playwright test smoke 2>&1 | tee /tmp/smoke-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
 
           if [ $EXIT_CODE -eq 0 ]; then
-            echo "TESTS_OK=true" >> "$GITHUB_ENV"
-            echo "All smoke tests passed"
+            echo "SMOKE_OK=true" >> "$GITHUB_ENV"
           else
-            echo "TESTS_OK=false" >> "$GITHUB_ENV"
-            echo "Some tests failed"
+            echo "SMOKE_OK=false" >> "$GITHUB_ENV"
           fi
-          exit 0  # Don't fail the workflow — we handle it below
+          exit 0
 
-      # Auto-fix if tests failed
-      - name: "Phase 5: Fix test failures"
-        id: fix_tests
-        if: env.TESTS_OK == 'false'
+      - name: "Phase 5b: Run performance tests"
+        id: e2e_perf
+        continue-on-error: true
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
+            echo "PERF_OK=skip" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "=== Phase 5b: Performance benchmarks ==="
+          npx playwright test performance 2>&1 | tee /tmp/perf-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "PERF_OK=true" >> "$GITHUB_ENV"
+          else
+            echo "PERF_OK=false" >> "$GITHUB_ENV"
+          fi
+          exit 0
+
+      # Auto-fix smoke failures
+      - name: "Phase 5: Fix smoke test failures"
+        id: fix_smoke
+        if: env.SMOKE_OK == 'false'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -432,9 +451,9 @@ jobs:
         run: |
           BRANCH=$(git branch --show-current)
           ISSUE_NUM="${{ github.event.issue.number }}"
-          TEST_OUTPUT=$(cat /tmp/test-output.txt | tail -50)
+          TEST_OUTPUT=$(cat /tmp/smoke-output.txt | tail -50)
 
-          cat > /tmp/fix-tests-prompt.txt << PROMPT_EOF
+          cat > /tmp/fix-smoke-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
           Playwright smoke tests FAILED after your implementation for Issue #${ISSUE_NUM}.
@@ -444,8 +463,8 @@ jobs:
 
           INSTRUCTIONS:
           1. Read the test failures carefully
-          2. Fix the code (NOT the tests) to make them pass
-          3. Run: npx playwright test — to verify fixes
+          2. Fix the application code (NOT the tests) to make them pass
+          3. Run: npx playwright test smoke — to verify fixes
           4. git add -A && git commit -m "fix: resolve smoke test failures (#${ISSUE_NUM})"
           5. git push origin ${BRANCH}
           6. Once pushed, STOP
@@ -454,12 +473,69 @@ jobs:
           Only fix tests if they have genuine bugs (wrong selectors, etc.)
           PROMPT_EOF
 
-          echo "=== Phase 5: Fixing test failures ==="
+          echo "=== Phase 5: Fixing smoke test failures ==="
           claude -p --dangerously-skip-permissions \
             --model claude-opus-4-6 \
             --max-turns 20 \
             --verbose \
-            "$(cat /tmp/fix-tests-prompt.txt)"
+            "$(cat /tmp/fix-smoke-prompt.txt)"
+
+      # Auto-fix performance regressions
+      - name: "Phase 5: Fix performance regressions"
+        id: fix_perf
+        if: env.PERF_OK == 'false'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          BRANCH=$(git branch --show-current)
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          PERF_OUTPUT=$(cat /tmp/perf-output.txt | tail -60)
+
+          cat > /tmp/fix-perf-prompt.txt << PROMPT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          Performance benchmarks FAILED after your implementation for Issue #${ISSUE_NUM}.
+          Your changes caused a performance regression.
+
+          FAILED BENCHMARKS:
+          ${PERF_OUTPUT}
+
+          PERFORMANCE BUDGETS (see tests/e2e/performance.spec.ts):
+          - Page load (DOMContentLoaded): < 2s
+          - Total page weight: < 500 KB
+          - JS heap: < 30 MB (after 2s gameplay)
+          - CLS: < 0.1
+          - Input response: < 500ms
+          - FPS: > 30 during gameplay
+          - Memory leak: < 5 MB growth over 10s
+
+          INSTRUCTIONS:
+          1. Identify which performance budget was exceeded
+          2. Optimize the code to fix the regression:
+             - Reduce file sizes (minify, remove unused code/assets)
+             - Fix memory leaks (clean up event listeners, timers, closures)
+             - Reduce layout thrashing (batch DOM reads/writes)
+             - Optimize canvas rendering (reduce draw calls, cache)
+             - Remove unnecessary network requests
+          3. Run: npx playwright test performance — to verify fixes
+          4. git add -A && git commit -m "perf: fix performance regression (#${ISSUE_NUM})"
+          5. git push origin ${BRANCH}
+          6. Once pushed, STOP
+
+          IMPORTANT: Optimize the code, do NOT relax the budget thresholds.
+          PROMPT_EOF
+
+          echo "=== Phase 5: Fixing performance regressions ==="
+          claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --max-turns 25 \
+            --verbose \
+            "$(cat /tmp/fix-perf-prompt.txt)"
 
       # ============================================================
       # SONNET FALLBACK (if all Opus attempts failed)
@@ -655,12 +731,20 @@ jobs:
         run: |
           # Report test results in notification
           TEST_STATUS=""
-          if [ "$TESTS_OK" = "true" ]; then
-            TEST_STATUS="Smoke tests: PASSED"
-          elif [ "$TESTS_OK" = "false" ]; then
-            TEST_STATUS="Smoke tests: FAILED (auto-fix attempted)"
+          if [ "$SMOKE_OK" = "true" ]; then
+            TEST_STATUS="Smoke: PASSED"
+          elif [ "$SMOKE_OK" = "false" ]; then
+            TEST_STATUS="Smoke: FAILED (auto-fix attempted)"
           else
-            TEST_STATUS="Smoke tests: skipped"
+            TEST_STATUS="Smoke: skipped"
+          fi
+
+          if [ "$PERF_OK" = "true" ]; then
+            TEST_STATUS="$TEST_STATUS | Perf: PASSED"
+          elif [ "$PERF_OK" = "false" ]; then
+            TEST_STATUS="$TEST_STATUS | Perf: REGRESSION (auto-fix attempted)"
+          else
+            TEST_STATUS="$TEST_STATUS | Perf: skipped"
           fi
 
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
