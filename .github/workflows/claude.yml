@@ -53,6 +53,14 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.dev.outputs.branch || 'main' }}
 
+      - name: Configure git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "claude[bot]"
+          git config user.email "claude[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
       - name: Ensure dev branch exists and is up to date with main
         if: steps.dev.outputs.branch != ''
         run: |
@@ -61,7 +69,7 @@ jobs:
             echo "Branch $BRANCH already exists — merging main into it"
             git merge origin/main --no-edit || {
               echo "Merge conflict — resetting to main"
-              git merge --abort
+              git merge --abort 2>/dev/null || true
               git reset --hard origin/main
             }
             git push origin "$BRANCH"
@@ -69,14 +77,6 @@ jobs:
             git checkout -b "$BRANCH" origin/main
             git push origin "$BRANCH"
           fi
-
-      - name: Configure git
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "claude[bot]"
-          git config user.email "claude[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
       - name: Save initial commit SHA
         run: echo "INITIAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
