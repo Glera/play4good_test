@@ -68,11 +68,11 @@ jobs:
           if git ls-remote --heads origin "$BRANCH" | grep -q .; then
             echo "Branch $BRANCH already exists — merging main into it"
             git merge origin/main --no-edit || {
-              echo "Merge conflict — resetting to main"
+              echo "Merge conflict with main — aborting merge, keeping dev branch as-is"
               git merge --abort 2>/dev/null || true
-              git reset --hard origin/main
+              echo "Dev branch preserved. CI infra updates from main will be skipped this run."
             }
-            git push origin "$BRANCH"
+            git push origin "$BRANCH" || true
           else
             git checkout -b "$BRANCH" origin/main
             git push origin "$BRANCH"
