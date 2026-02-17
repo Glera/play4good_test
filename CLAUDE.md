@@ -14,13 +14,18 @@
 
 ```
 /
-├── index.html      # Главная страница, подключает всё остальное
-├── style.css       # Стили
-├── app.js          # Логика приложения
-├── notify.sh       # Скрипт для отправки сообщений в Telegram
-├── DEVLOG.md       # Лог изменений для cherry-pick в main
-├── CLAUDE.md       # Этот файл
-└── README.md       # Описание проекта и инструкции по деплою
+├── index.html          # Главная страница, подключает всё остальное
+├── style.css           # Стили
+├── app.js              # Логика приложения
+├── notify.sh           # Скрипт для отправки сообщений в Telegram
+├── codex-review.sh     # Скрипт для code review через Codex 5.2
+├── tests/e2e/
+│   └── smoke.spec.ts   # Playwright smoke-тесты
+├── playwright.config.ts
+├── package.json
+├── DEVLOG.md           # Лог изменений для cherry-pick в main
+├── CLAUDE.md           # Этот файл
+└── README.md           # Описание проекта и инструкции по деплою
 ```
 
 ## Правила кода
@@ -53,6 +58,44 @@
 2. Нет ошибок в console
 3. Страница корректно отображается при ширине 320px–1024px
 4. Используются цвета темы Telegram, а не хардкод
+5. `npx playwright test` — smoke-тесты проходят
+
+---
+
+## Мульти-агентный workflow (CI)
+
+GitHub Actions запускает 5-фазный pipeline при создании issue:
+
+```
+Phase 1: Plan     — Claude (Opus) читает issue, пишет план в /tmp/plan.md
+Phase 2: Review   — Codex 5.2 ревьюит план, замечания в /tmp/codex-plan-review.txt
+Phase 3: Implement — Claude реализует с учётом плана + замечаний Codex
+Phase 4: Code Review — Codex ревьюит diff, Claude фиксит замечания (1 проход)
+Phase 5a: Smoke Tests — функциональные тесты, при ошибках Claude автофиксит
+Phase 5b: Performance — бенчмарки, при регрессии Claude оптимизирует
+```
+
+Все фазы отправляют статус в Telegram через `notify.sh`.
+Если Opus не справился — fallback на Sonnet.
+
+### Performance бюджеты (tests/e2e/performance.spec.ts)
+- DOMContentLoaded: < 2s
+- Page load: < 3s
+- FCP: < 2s
+- Total page weight: < 500 KB
+- JS heap: < 30 MB
+- CLS: < 0.1
+- Input response: < 500ms
+- FPS: > 30
+- Memory growth over 10s: < 5 MB
+
+Если изменение ломает бюджет — Claude автоматически пытается оптимизировать.
+Бюджеты НЕ должны ослабляться — код должен быть оптимизирован.
+
+### Секреты (GitHub Actions)
+- `CLAUDE_CODE_OAUTH_TOKEN` — для Claude Code CLI
+- `OPENAI_API_KEY` — для Codex 5.2 review
+- `BOT_WEBHOOK_URL` — URL бота для уведомлений в Telegram
 
 ---
 
