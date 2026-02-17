@@ -556,6 +556,7 @@ jobs:
       # ============================================================
 
       - name: Check if Opus succeeded
+        if: always()
         id: opus_result
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
@@ -647,6 +648,7 @@ jobs:
       # ============================================================
 
       - name: Verify actual push
+        if: always()
         id: verify
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
@@ -675,7 +677,7 @@ jobs:
           fi
 
       - name: Update DEVLOG.md
-        if: steps.verify.outputs.pushed == 'true'
+        if: always() && steps.verify.outputs.pushed == 'true'
         continue-on-error: true
         run: |
           BRANCH=$(git branch --show-current)
@@ -728,7 +730,7 @@ jobs:
       # ============================================================
 
       - name: "Notify: all failed"
-        if: steps.verify.outputs.pushed == 'false' && steps.dev.outputs.branch != ''
+        if: always() && steps.verify.outputs.pushed != 'true' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
@@ -736,7 +738,7 @@ jobs:
             -d "{\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
       - name: "Notify: changes pushed"
-        if: steps.verify.outputs.pushed == 'true' && steps.dev.outputs.branch != ''
+        if: always() && steps.verify.outputs.pushed == 'true' && steps.dev.outputs.branch != ''
         continue-on-error: true
         env:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
@@ -771,7 +773,7 @@ jobs:
           fi
 
       - name: Close issue
-        if: steps.verify.outputs.pushed == 'true'
+        if: always() && steps.verify.outputs.pushed == 'true'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
