@@ -2,6 +2,26 @@
 
 История изменений для cherry-pick в main.
 
+## #116 — тестовый тикет проверить работу нового воркфлоу
+**Дата:** 2026-02-17
+**Ветка:** dev/Gleb
+**Коммит:** `04a176a`
+**Статус:** ✅ готово к переносу
+
+### Что сделано
+Обновлены smoke и performance тесты с Tetris на Mahjong Solitaire. Все селекторы приведены в соответствие с текущим HTML (game-board как div, footer-btn-circle вместо control-btn, Mahjong-специфичные ID). Добавлена фильтрация ошибок Telegram SDK в console. Удалены тесты для несуществующих элементов (canvas, next-piece).
+
+### Изменённые файлы
+- `tests/e2e/smoke.spec.ts` — полное обновление под Mahjong: title, селекторы, кнопки, touch targets
+- `tests/e2e/performance.spec.ts` — переименование Tetris→Mahjong, замена кнопок в memory leak тесте
+
+### Как перенести в main
+```bash
+git cherry-pick 04a176a3940df3ed07e74c4895f0c4a4f870bae0
+```
+
+---
+
 ## #112 — Тест очереди 3
 **Дата:** 2026-02-09  
 **Ветка:** dev/Gleb  

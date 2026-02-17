@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Performance budgets for P4G Tetris.
+ * Performance budgets for P4G Mahjong.
  * These are generous thresholds — a simple HTML/CSS/JS game should easily meet them.
  * If a change blows past these, something is wrong.
  */
@@ -14,7 +14,7 @@ const BUDGETS = {
   fcp: 2_000,
   /** Total transferred bytes for all resources */
   totalPageWeight: 500 * 1024, // 500 KB
-  /** JS heap snapshot — should stay small for a canvas game */
+  /** JS heap snapshot — should stay small for a DOM-based game */
   jsHeapLimit: 30 * 1024 * 1024, // 30 MB
   /** Cumulative Layout Shift — should be 0 for a game */
   cls: 0.1,
@@ -24,7 +24,7 @@ const BUDGETS = {
   minFps: 30,
 };
 
-test.describe('P4G Tetris — Performance', () => {
+test.describe('P4G Mahjong — Performance', () => {
 
   test('page load timing within budget', async ({ page }) => {
     // Collect performance timing
@@ -215,18 +215,21 @@ test.describe('P4G Tetris — Performance', () => {
     await page.goto('/', { waitUntil: 'load' });
     await page.locator('#btn-start').click();
 
+    // Wait for fly-in animation to settle
+    await page.waitForTimeout(3000);
+
     // Measure heap at start
     const heapStart = await page.evaluate(() => {
       // @ts-ignore
       return (performance as any).memory?.usedJSHeapSize ?? 0;
     });
 
-    // Play for 10 seconds — press buttons to create activity
+    // Play for 10 seconds — use hint and shuffle buttons to create activity
     for (let i = 0; i < 20; i++) {
-      await page.locator('#btn-down').click();
-      await page.waitForTimeout(200);
-      if (i % 5 === 0) await page.locator('#btn-rotate').click();
-      if (i % 3 === 0) await page.locator('#btn-left').click();
+      await page.locator('#btn-hint').click();
+      await page.waitForTimeout(300);
+      if (i % 5 === 0) await page.locator('#btn-shuffle').click();
+      if (i % 3 === 0) await page.waitForTimeout(200);
     }
 
     // Force GC if possible, then measure
