@@ -12,7 +12,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'chrome', use: { ...devices['Desktop Chrome'] } },
-    { name: 'mobile', use: { ...devices['iPhone 14'] } },
+    { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
   // Local dev: serve the static files
   webServer: process.env.BASE_URL ? undefined : {
