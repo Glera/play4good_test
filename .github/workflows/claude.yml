@@ -1,4 +1,4 @@
-name: Claude Code
+name: Claude Code (Multi-Agent)
 
 on:
   issues:
@@ -14,10 +14,13 @@ jobs:
   claude:
     if: github.event_name == 'issues'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
-      # 1. Определяем dev-ветку из лейбла
+      # ============================================================
+      # SETUP: Branch detection, checkout, git config
+      # ============================================================
+
       - name: Detect developer branch
         id: dev
         uses: actions/github-script@v7
@@ -30,10 +33,6 @@ jobs:
               labels = context.payload.issue.labels.map(l => l.name);
               issueTitle = context.payload.issue.title;
               issueNumber = context.payload.issue.number;
-            } else if (context.payload.pull_request) {
-              labels = context.payload.pull_request.labels.map(l => l.name);
-              issueTitle = context.payload.pull_request.title;
-              issueNumber = context.payload.pull_request.number;
             }
 
             const devLabel = labels.find(l => l.startsWith('developer:'));
@@ -48,31 +47,68 @@ jobs:
             core.setOutput('dev_name', devName);
             core.setOutput('issue_title', issueTitle);
             core.setOutput('issue_number', String(issueNumber));
-            console.log(`Developer: ${devName || '(none)'}`);
-            console.log(`Target branch: ${branch || 'main (default)'}`);
 
-      # 2. Checkout на dev-ветку
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ steps.dev.outputs.branch || 'main' }}
 
-      # 3. Создаём dev-ветку из main если её ещё нет
       - name: Ensure dev branch exists
         if: steps.dev.outputs.branch != ''
         run: |
           BRANCH="${{ steps.dev.outputs.branch }}"
           if git ls-remote --heads origin "$BRANCH" | grep -q .; then
-            echo "✅ Branch $BRANCH already exists"
+            echo "Branch $BRANCH already exists"
           else
-            echo "🌱 Creating $BRANCH from main"
             git checkout -b "$BRANCH" origin/main
             git push origin "$BRANCH"
-            echo "✅ Branch $BRANCH created"
           fi
 
-      # 4. 🔔 Уведомление: Claude начал работу
-      - name: Notify — Claude started
+      - name: Configure git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "claude[bot]"
+          git config user.email "claude[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+      - name: Save initial commit SHA
+        run: echo "INITIAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install Claude Code CLI
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          $HOME/.local/bin/claude --version
+
+      - name: Setup tools
+        run: |
+          # notify.sh
+          if [ -f "./notify.sh" ]; then
+            sed -i 's/\r$//' ./notify.sh
+            chmod +x ./notify.sh
+          fi
+          # codex-review.sh
+          if [ -f "./codex-review.sh" ]; then
+            sed -i 's/\r$//' ./codex-review.sh
+            chmod +x ./codex-review.sh
+          fi
+
+      - name: Setup Node.js (for Playwright)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm ci
+          npx playwright install chromium
+
+      # ============================================================
+      # NOTIFY: Claude started
+      # ============================================================
+
+      - name: "Notify: Claude started"
         if: steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
@@ -80,81 +116,398 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
-      # 5. Настраиваем git + auth для push
-      - name: Configure git
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "claude[bot]"
-          git config user.email "claude[bot]@users.noreply.github.com"
+      # ============================================================
+      # PHASE 1: PLAN (Claude writes a plan)
+      # ============================================================
 
-          # Вшиваем токен в remote URL чтобы Claude CLI мог пушить
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-
-          # Проверяем что push работает
-          echo "✅ Git configured with push access"
-          git remote -v
-
-      # 6. Запоминаем SHA до работы Claude
-      - name: Save initial commit SHA
-        run: |
-          echo "INITIAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-
-      # 7. Устанавливаем Claude Code CLI
-      - name: Install Claude Code CLI
-        run: |
-          curl -fsSL https://claude.ai/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "✅ Claude Code CLI installed"
-          $HOME/.local/bin/claude --version
-
-      # 8. Подготовка notify.sh для коммуникации Claude → Telegram
-      - name: Setup Claude notifications
-        run: |
-          if [ -f "./notify.sh" ]; then
-            # Fix Windows line endings if present
-            sed -i 's/\r$//' ./notify.sh
-            chmod +x ./notify.sh
-            echo "✅ notify.sh ready"
-          else
-            echo "⚠️ notify.sh not found — Claude won't be able to send messages"
-          fi
-
-      # 9. Отправляем план в Telegram ДО запуска Claude
-      - name: Notify — Claude starting task
+      - name: "Phase 1: Plan"
+        id: plan
         continue-on-error: true
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
           GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
-          echo "DEBUG: BOT_NOTIFY_URL is set: $( [ -n \"$BOT_NOTIFY_URL\" ] && echo 'yes' || echo 'no' )"
-          echo "DEBUG: ISSUE_NUMBER=$ISSUE_NUMBER"
-          echo "DEBUG: GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
-          if [ -f "./notify.sh" ]; then
-            echo "DEBUG: notify.sh exists, calling it..."
-            ./notify.sh info "Claude приступает к задаче: ${{ steps.dev.outputs.issue_title }}"
-            echo "DEBUG: notify.sh exit code: $?"
-          else
-            echo "DEBUG: notify.sh NOT FOUND"
-          fi
-
-      # 10. Готовим промпт из issue
-      - name: Prepare prompt
-        id: prompt
-        shell: bash
-        run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
-          ISSUE_TITLE=$(echo "${{ steps.dev.outputs.issue_title }}" | sed 's/"/\\"/g')
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
           BRANCH=$(git branch --show-current)
 
-          cat > /tmp/claude-prompt.txt << PROMPT_EOF
-          You are working in a GitHub repository checkout on branch "${BRANCH}".
+          cat > /tmp/plan-prompt.txt << 'PROMPT_EOF'
+          You are working in a GitHub repository on branch "BRANCH_PLACEHOLDER".
+
+          TASK: Create a detailed implementation plan for Issue #ISSUE_PLACEHOLDER: "TITLE_PLACEHOLDER"
+
+          INSTRUCTIONS:
+          1. Read CLAUDE.md for project rules
+          2. Examine the codebase to understand the current state
+          3. Write a concise implementation plan (10-30 lines) to /tmp/plan.md
+          4. The plan should include:
+             - What files will be changed/created
+             - What specific changes will be made
+             - Edge cases to consider
+             - Testing approach
+          5. Run: ./notify.sh plan "$(cat /tmp/plan.md | head -5)"
+
+          IMPORTANT:
+          - DO NOT make any code changes yet
+          - DO NOT commit or push anything
+          - ONLY write the plan to /tmp/plan.md and notify
+          - Stay on the current branch
+          PROMPT_EOF
+
+          # Replace placeholders
+          sed -i "s|BRANCH_PLACEHOLDER|$BRANCH|g" /tmp/plan-prompt.txt
+          sed -i "s|ISSUE_PLACEHOLDER|$ISSUE_NUM|g" /tmp/plan-prompt.txt
+          sed -i "s|TITLE_PLACEHOLDER|$ISSUE_TITLE|g" /tmp/plan-prompt.txt
+
+          echo "=== Phase 1: Planning ==="
+          claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --max-turns 15 \
+            --verbose \
+            "$(cat /tmp/plan-prompt.txt)" 2>&1 | tee /tmp/phase1-output.txt
+
+          # Verify plan was created
+          if [ -f /tmp/plan.md ]; then
+            echo "PLAN_CREATED=true" >> "$GITHUB_ENV"
+            echo "=== Plan contents ==="
+            cat /tmp/plan.md
+          else
+            echo "PLAN_CREATED=false" >> "$GITHUB_ENV"
+            echo "Plan file not created — extracting from output"
+            # Try to create a minimal plan from Claude's output
+            echo "Auto-extracted plan from Claude output" > /tmp/plan.md
+            tail -50 /tmp/phase1-output.txt >> /tmp/plan.md
+          fi
+
+      # ============================================================
+      # PHASE 2: CODEX REVIEW (Codex 5.2 reviews the plan)
+      # ============================================================
+
+      - name: "Phase 2: Codex plan review"
+        id: codex_plan
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          if [ ! -f /tmp/plan.md ]; then
+            echo "No plan to review — skipping"
+            echo "CODEX_REVIEW=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "=== Phase 2: Codex reviewing plan ==="
+          REVIEW=$(./codex-review.sh plan /tmp/plan.md 2>/dev/null || echo "Codex review unavailable")
+          echo "$REVIEW" > /tmp/codex-plan-review.txt
+          echo "CODEX_PLAN_REVIEW<<REVIEW_EOF" >> "$GITHUB_ENV"
+          echo "$REVIEW" >> "$GITHUB_ENV"
+          echo "REVIEW_EOF" >> "$GITHUB_ENV"
+
+          echo "=== Codex review ==="
+          echo "$REVIEW"
+
+          # Send to Telegram
+          if [ -f "./notify.sh" ]; then
+            REVIEW_SHORT=$(echo "$REVIEW" | head -10)
+            ./notify.sh info "Codex review: $REVIEW_SHORT"
+          fi
+
+      # ============================================================
+      # PHASE 3: IMPLEMENT (Claude implements with plan + review)
+      # ============================================================
+
+      - name: "Phase 3: Implement"
+        id: implement
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          BRANCH=$(git branch --show-current)
+
+          PLAN=""
+          if [ -f /tmp/plan.md ]; then
+            PLAN=$(cat /tmp/plan.md)
+          fi
+
+          REVIEW=""
+          if [ -f /tmp/codex-plan-review.txt ]; then
+            REVIEW=$(cat /tmp/codex-plan-review.txt)
+          fi
+
+          cat > /tmp/implement-prompt.txt << PROMPT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
 
           TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
 
-          ⚠️ MANDATORY FIRST STEP — RUN THIS COMMAND BEFORE ANYTHING ELSE:
-          ./notify.sh plan "Your 1-2 sentence plan describing what you will change"
+          YOUR PLAN (from Phase 1):
+          ${PLAN}
+
+          CODEX REVIEWER FEEDBACK (address any concerns):
+          ${REVIEW}
+
+          WORKFLOW:
+          1. Read CLAUDE.md for project rules
+          2. Implement the changes according to the plan
+          3. Address the Codex reviewer's feedback
+          4. ./notify.sh progress "Brief description of what was done"
+          5. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
+          6. git push origin ${BRANCH}
+
+          RULES:
+          - Stay on branch ${BRANCH}
+          - Make clean, focused changes
+          - Follow project conventions from CLAUDE.md
+          - Once pushed, STOP — do not loop
+          PROMPT_EOF
+
+          echo "=== Phase 3: Implementing ==="
+          set +e
+          claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --max-turns 50 \
+            --verbose \
+            "$(cat /tmp/implement-prompt.txt)" 2>&1 | tee /tmp/phase3-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if grep -qi "Reached max turns\|max.turns" /tmp/phase3-output.txt; then
+            echo "IMPL_MAX_TURNS=true" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          exit $EXIT_CODE
+
+      # Continue implementation if hit max turns
+      - name: "Phase 3: Implement continue (+30)"
+        id: impl_cont
+        if: steps.implement.outcome == 'failure' && env.IMPL_MAX_TURNS == 'true'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          echo "=== Phase 3: Continuing implementation (+30 turns) ==="
+          claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --continue \
+            --max-turns 30 \
+            --verbose
+
+      # ============================================================
+      # PHASE 4: CODE REVIEW (Codex reviews the diff)
+      # ============================================================
+
+      - name: "Phase 4: Codex code review"
+        id: codex_code
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
+            echo "No changes to review — skipping"
+            echo "CODE_REVIEW_OK=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "=== Phase 4: Codex reviewing code ==="
+          git diff "$INITIAL_SHA"..HEAD > /tmp/changes.diff
+
+          REVIEW=$(./codex-review.sh code /tmp/changes.diff 2>/dev/null || echo "Codex review unavailable")
+          echo "$REVIEW" > /tmp/codex-code-review.txt
+
+          echo "=== Codex code review ==="
+          echo "$REVIEW"
+
+          # Send to Telegram
+          if [ -f "./notify.sh" ]; then
+            REVIEW_SHORT=$(echo "$REVIEW" | head -10)
+            ./notify.sh info "Code review: $REVIEW_SHORT"
+          fi
+
+          # Check if review found issues
+          if echo "$REVIEW" | grep -qi "выглядит хорошо\|looks good\|no issues"; then
+            echo "CODE_REVIEW_OK=true" >> "$GITHUB_ENV"
+          else
+            echo "CODE_REVIEW_OK=false" >> "$GITHUB_ENV"
+          fi
+
+      # Fix issues found by code review (one pass)
+      - name: "Phase 4: Fix review issues"
+        id: fix_review
+        if: env.CODE_REVIEW_OK == 'false'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          BRANCH=$(git branch --show-current)
+          ISSUE_NUM="${{ github.event.issue.number }}"
+
+          REVIEW=""
+          if [ -f /tmp/codex-code-review.txt ]; then
+            REVIEW=$(cat /tmp/codex-code-review.txt)
+          fi
+
+          cat > /tmp/fix-prompt.txt << PROMPT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          A code reviewer (Codex) found issues with your implementation for Issue #${ISSUE_NUM}.
+
+          REVIEW FEEDBACK:
+          ${REVIEW}
+
+          INSTRUCTIONS:
+          1. Fix the issues mentioned in the review
+          2. Do NOT break existing functionality
+          3. git add -A && git commit -m "fix: address code review feedback (#${ISSUE_NUM})"
+          4. git push origin ${BRANCH}
+          5. Once pushed, STOP
+          PROMPT_EOF
+
+          echo "=== Phase 4: Fixing review issues ==="
+          claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --max-turns 20 \
+            --verbose \
+            "$(cat /tmp/fix-prompt.txt)"
+
+      # ============================================================
+      # PHASE 5: E2E SMOKE TESTS
+      # ============================================================
+
+      - name: "Phase 5: Run smoke tests"
+        id: e2e
+        continue-on-error: true
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
+            echo "No changes — skipping tests"
+            echo "TESTS_OK=skip" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "=== Phase 5: Running Playwright smoke tests ==="
+          npx playwright test 2>&1 | tee /tmp/test-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "TESTS_OK=true" >> "$GITHUB_ENV"
+            echo "All smoke tests passed"
+          else
+            echo "TESTS_OK=false" >> "$GITHUB_ENV"
+            echo "Some tests failed"
+          fi
+          exit 0  # Don't fail the workflow — we handle it below
+
+      # Auto-fix if tests failed
+      - name: "Phase 5: Fix test failures"
+        id: fix_tests
+        if: env.TESTS_OK == 'false'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          BRANCH=$(git branch --show-current)
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          TEST_OUTPUT=$(cat /tmp/test-output.txt | tail -50)
+
+          cat > /tmp/fix-tests-prompt.txt << PROMPT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          Playwright smoke tests FAILED after your implementation for Issue #${ISSUE_NUM}.
+
+          TEST OUTPUT:
+          ${TEST_OUTPUT}
+
+          INSTRUCTIONS:
+          1. Read the test failures carefully
+          2. Fix the code (NOT the tests) to make them pass
+          3. Run: npx playwright test — to verify fixes
+          4. git add -A && git commit -m "fix: resolve smoke test failures (#${ISSUE_NUM})"
+          5. git push origin ${BRANCH}
+          6. Once pushed, STOP
+
+          IMPORTANT: Fix the application code, not the test expectations.
+          Only fix tests if they have genuine bugs (wrong selectors, etc.)
+          PROMPT_EOF
+
+          echo "=== Phase 5: Fixing test failures ==="
+          claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --max-turns 20 \
+            --verbose \
+            "$(cat /tmp/fix-tests-prompt.txt)"
+
+      # ============================================================
+      # SONNET FALLBACK (if all Opus attempts failed)
+      # ============================================================
+
+      - name: Check if Opus succeeded
+        id: opus_result
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" != "$INITIAL_SHA" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reset for Sonnet
+        if: steps.opus_result.outputs.ok == 'false'
+        run: |
+          git checkout -- . 2>/dev/null || true
+          git clean -fd 2>/dev/null || true
+
+      - name: "Notify: switching to Sonnet"
+        if: steps.opus_result.outputs.ok == 'false' && steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"opus_unavailable\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+
+      - name: "Claude Code — Sonnet (fallback)"
+        id: sonnet
+        if: steps.opus_result.outputs.ok == 'false'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          BRANCH=$(git branch --show-current)
+
+          cat > /tmp/sonnet-prompt.txt << PROMPT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
 
           WORKFLOW:
           1. ./notify.sh plan "Your plan"
@@ -166,196 +519,24 @@ jobs:
           RULES:
           - Stay on branch ${BRANCH}
           - Make clean, focused changes
-          - Once pushed, STOP — do not loop
+          - Once pushed, STOP
           PROMPT_EOF
 
-          echo "✅ Prompt ready for issue #${ISSUE_NUM} on branch ${BRANCH}"
-          cat /tmp/claude-prompt.txt
-
-      # ============================================================
-      # OPUS: основной запуск (50 тёрнов)
-      # ============================================================
-      - name: "Claude Code — Opus"
-        id: opus1
-        continue-on-error: true
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
-          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
-        run: |
           set +e
-          # Export vars for notify.sh called by Claude
-          export ISSUE_NUMBER="${{ steps.dev.outputs.issue_number }}"
-          export BOT_NOTIFY_URL="${{ secrets.BOT_WEBHOOK_URL }}"
-          export GITHUB_HEAD_REF="${{ steps.dev.outputs.branch }}"
-          
-          echo "🧠 Running Claude Code (Opus)..."
-          claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-6 \
-            --max-turns 50 \
-            --verbose \
-            "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-
-          # CLI выходит с кодом 0 даже при max turns — принудительно фейлим
-          if grep -qi "Reached max turns\|max.turns" /tmp/claude-output.txt; then
-            echo "OPUS_MAX_TURNS=true" >> "$GITHUB_ENV"
-            echo "⏳ Hit max turns — will continue session"
-            exit 1
-          fi
-          exit $EXIT_CODE
-
-      # ============================================================
-      # OPUS: продолжение если не уложился в тёрны (+30)
-      # ============================================================
-      - name: "Claude Code — Opus continue (+30 turns)"
-        id: opus_cont1
-        if: steps.opus1.outcome == 'failure' && env.OPUS_MAX_TURNS == 'true'
-        continue-on-error: true
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
-          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
-        run: |
-          set +e
-          echo "🔄 Continuing Opus session (+30 turns)..."
-          claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-6 \
-            --continue \
-            --max-turns 30 \
-            --verbose 2>&1 | tee /tmp/claude-output2.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-
-          if grep -qi "Reached max turns\|max.turns" /tmp/claude-output2.txt; then
-            echo "OPUS_MAX_TURNS_2=true" >> "$GITHUB_ENV"
-            echo "⏳ Still hitting max turns — one more continue"
-            exit 1
-          fi
-          exit $EXIT_CODE
-
-      # ============================================================
-      # OPUS: ещё одно продолжение (+30, итого до 110)
-      # ============================================================
-      - name: "Claude Code — Opus continue 2 (+30 turns)"
-        id: opus_cont2
-        if: steps.opus_cont1.outcome == 'failure' && env.OPUS_MAX_TURNS_2 == 'true'
-        continue-on-error: true
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
-          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
-        run: |
-          echo "🔄 Continuing Opus session (final +30 turns, total 110)..."
-          claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-6 \
-            --continue \
-            --max-turns 30 \
-            --verbose
-
-      # ============================================================
-      # Определяем: Opus успешен?
-      # ============================================================
-      - name: Check Opus result
-        id: opus_result
-        run: |
-          if [[ "${{ steps.opus1.outcome }}" == "success" ]] || \
-             [[ "${{ steps.opus_cont1.outcome }}" == "success" ]] || \
-             [[ "${{ steps.opus_cont2.outcome }}" == "success" ]]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ============================================================
-      # OPUS: retry (только при реальной ошибке, НЕ max turns)
-      # ============================================================
-      - name: Reset after Opus real error
-        if: steps.opus_result.outputs.ok == 'false' && env.OPUS_MAX_TURNS != 'true'
-        run: |
-          echo "🧹 Real error — resetting for retry..."
-          git checkout -- . 2>/dev/null || true
-          git clean -fd 2>/dev/null || true
-
-      - name: "Claude Code — Opus (retry after error)"
-        id: opus_retry
-        if: steps.opus_result.outputs.ok == 'false' && env.OPUS_MAX_TURNS != 'true'
-        continue-on-error: true
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
-          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
-        run: |
-          echo "🧠 Retrying Claude Code (Opus)..."
-          claude -p --dangerously-skip-permissions \
-            --model claude-opus-4-6 \
-            --max-turns 50 \
-            --verbose \
-            "$(cat /tmp/claude-prompt.txt)"
-
-      # ============================================================
-      # SONNET: fallback (если Opus не справился)
-      # ============================================================
-      - name: Check if need Sonnet
-        id: need_sonnet
-        run: |
-          OPUS_OK="false"
-          if [[ "${{ steps.opus_result.outputs.ok }}" == "true" ]] || \
-             [[ "${{ steps.opus_retry.outcome }}" == "success" ]]; then
-            OPUS_OK="true"
-          fi
-          echo "opus_ok=$OPUS_OK" >> "$GITHUB_OUTPUT"
-
-      - name: Reset for Sonnet
-        if: steps.need_sonnet.outputs.opus_ok == 'false'
-        run: |
-          echo "🧹 Resetting for Sonnet fallback..."
-          git checkout -- . 2>/dev/null || true
-          git clean -fd 2>/dev/null || true
-
-      - name: Notify — switching to Sonnet
-        if: steps.need_sonnet.outputs.opus_ok == 'false' && steps.dev.outputs.branch != ''
-        continue-on-error: true
-        run: |
-          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
-            -H "Content-Type: application/json" \
-            -d "{\"event\":\"opus_unavailable\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
-
-      - name: "Claude Code — Sonnet (fallback)"
-        id: sonnet
-        if: steps.need_sonnet.outputs.opus_ok == 'false'
-        continue-on-error: true
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
-          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
-        run: |
-          set +e
-          echo "🧠 Running Claude Code (Sonnet, fallback)..."
           claude -p --dangerously-skip-permissions \
             --model claude-sonnet-4-5-20250929 \
             --max-turns 50 \
             --verbose \
-            "$(cat /tmp/claude-prompt.txt)" 2>&1 | tee /tmp/claude-sonnet.txt
+            "$(cat /tmp/sonnet-prompt.txt)" 2>&1 | tee /tmp/sonnet-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
 
-          if grep -qi "Reached max turns\|max.turns" /tmp/claude-sonnet.txt; then
+          if grep -qi "Reached max turns\|max.turns" /tmp/sonnet-output.txt; then
             echo "SONNET_MAX_TURNS=true" >> "$GITHUB_ENV"
             exit 1
           fi
           exit $EXIT_CODE
 
-      - name: "Claude Code — Sonnet continue (+30 turns)"
-        id: sonnet_cont
+      - name: "Claude Code — Sonnet continue (+30)"
         if: steps.sonnet.outcome == 'failure' && env.SONNET_MAX_TURNS == 'true'
         continue-on-error: true
         env:
@@ -365,7 +546,6 @@ jobs:
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
           GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
-          echo "🔄 Continuing Sonnet session (+30 turns)..."
           claude -p --dangerously-skip-permissions \
             --model claude-sonnet-4-5-20250929 \
             --continue \
@@ -373,8 +553,9 @@ jobs:
             --verbose
 
       # ============================================================
-      # ФИНАЛ: проверяем реальный git push (не верим exit code!)
+      # VERIFY & FINALIZE
       # ============================================================
+
       - name: Verify actual push
         id: verify
         run: |
@@ -382,32 +563,27 @@ jobs:
           echo "Initial SHA: $INITIAL_SHA"
           echo "Current SHA: $CURRENT_SHA"
 
-          # Проверяем локальные коммиты
           if [[ "$CURRENT_SHA" != "$INITIAL_SHA" ]]; then
-            echo "✅ New local commits detected!"
+            echo "New local commits detected"
             git log --oneline "$INITIAL_SHA"..HEAD
             echo "pushed=true" >> "$GITHUB_OUTPUT"
             echo "commit_sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
             echo "commit_sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           else
-            # Может Claude запушил напрямую — проверяем remote
             git fetch origin
             BRANCH=$(git branch --show-current)
             REMOTE_SHA=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "none")
             if [[ "$REMOTE_SHA" != "$INITIAL_SHA" ]] && [[ "$REMOTE_SHA" != "none" ]]; then
-              echo "✅ Remote has new commits!"
+              echo "Remote has new commits"
               echo "pushed=true" >> "$GITHUB_OUTPUT"
               echo "commit_sha=$REMOTE_SHA" >> "$GITHUB_OUTPUT"
               echo "commit_sha_short=$(git rev-parse --short $REMOTE_SHA)" >> "$GITHUB_OUTPUT"
             else
-              echo "❌ No new commits — Claude didn't push anything"
+              echo "No new commits"
               echo "pushed=false" >> "$GITHUB_OUTPUT"
             fi
           fi
 
-      # ============================================================
-      # DEVLOG: автоматическое обновление лога изменений
-      # ============================================================
       - name: Update DEVLOG.md
         if: steps.verify.outputs.pushed == 'true'
         continue-on-error: true
@@ -418,32 +594,23 @@ jobs:
           ISSUE_NUM="${{ steps.dev.outputs.issue_number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
           TODAY=$(date +%Y-%m-%d)
-          
-          # Получаем список изменённых файлов
+
           CHANGED_FILES=$(git diff --name-only "$INITIAL_SHA".."$COMMIT_SHA" 2>/dev/null | grep -v "DEVLOG.md" || echo "")
-          
-          # Формируем список файлов для DEVLOG
+
           FILES_LIST=""
           while IFS= read -r file; do
-            if [ -n "$file" ]; then
-              FILES_LIST="${FILES_LIST}- \`${file}\`
+            [ -n "$file" ] && FILES_LIST="${FILES_LIST}- \`${file}\`
           "
-            fi
           done <<< "$CHANGED_FILES"
-          
-          # Создаём DEVLOG.md если не существует
+
           if [ ! -f "DEVLOG.md" ]; then
-            echo "# Development Log" > DEVLOG.md
-            echo "" >> DEVLOG.md
-            echo "История изменений для cherry-pick в main." >> DEVLOG.md
-            echo "" >> DEVLOG.md
+            printf "# Development Log\n\nИстория изменений для cherry-pick в main.\n\n" > DEVLOG.md
           fi
-          
-          # Создаём новую запись
+
           ENTRY="## #${ISSUE_NUM} — ${ISSUE_TITLE}
-          **Дата:** ${TODAY}  
-          **Ветка:** ${BRANCH}  
-          **Коммит:** \`${COMMIT_SHORT}\`  
+          **Дата:** ${TODAY}
+          **Ветка:** ${BRANCH}
+          **Коммит:** \`${COMMIT_SHORT}\`
           **Статус:** ✅ готово к переносу
 
           ### Изменённые файлы
@@ -456,24 +623,21 @@ jobs:
           ---
 
           "
-          
-          # Вставляем запись после заголовка (после первых 4 строк)
+
           head -4 DEVLOG.md > DEVLOG_new.md
           echo "$ENTRY" >> DEVLOG_new.md
           tail -n +5 DEVLOG.md >> DEVLOG_new.md
           mv DEVLOG_new.md DEVLOG.md
-          
-          # Коммитим и пушим
+
           git add DEVLOG.md
-          git commit -m "docs: update DEVLOG for #${ISSUE_NUM}" || echo "No changes to commit"
-          git push origin "$BRANCH" || echo "Push failed"
-          
-          echo "✅ DEVLOG.md updated for issue #${ISSUE_NUM}"
+          git commit -m "docs: update DEVLOG for #${ISSUE_NUM}" || true
+          git push origin "$BRANCH" || true
 
       # ============================================================
-      # УВЕДОМЛЕНИЯ (только на основе реального push!)
+      # NOTIFICATIONS
       # ============================================================
-      - name: Notify — all attempts failed
+
+      - name: "Notify: all failed"
         if: steps.verify.outputs.pushed == 'false' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
@@ -481,13 +645,32 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
-      - name: Notify — changes pushed
+      - name: "Notify: changes pushed"
         if: steps.verify.outputs.pushed == 'true' && steps.dev.outputs.branch != ''
         continue-on-error: true
+        env:
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
+          # Report test results in notification
+          TEST_STATUS=""
+          if [ "$TESTS_OK" = "true" ]; then
+            TEST_STATUS="Smoke tests: PASSED"
+          elif [ "$TESTS_OK" = "false" ]; then
+            TEST_STATUS="Smoke tests: FAILED (auto-fix attempted)"
+          else
+            TEST_STATUS="Smoke tests: skipped"
+          fi
+
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
             -d "{\"event\":\"merged\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+
+          # Send test status via notify.sh
+          if [ -f "./notify.sh" ]; then
+            ./notify.sh done "$TEST_STATUS. Task complete."
+          fi
 
       - name: Close issue
         if: steps.verify.outputs.pushed == 'true'
@@ -503,5 +686,4 @@ jobs:
                 issue_number: issueNum,
                 state: 'closed'
               });
-              console.log(`✅ Closed issue #${issueNum}`);
             }
