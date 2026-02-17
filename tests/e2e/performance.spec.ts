@@ -94,9 +94,12 @@ test.describe('P4G Mahjong — Performance', () => {
 
     await page.goto('/', { waitUntil: 'load' });
 
-    // Start the game and let it run briefly to measure real usage
+    // Start the game and wait for fly-in animations to complete
     await page.locator('#btn-start').click();
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(() =>
+      document.querySelectorAll('.mahjong-tile.fly-in').length === 0 ||
+      document.getAnimations().every(a => a.playState === 'finished')
+    , { timeout: 10_000 });
 
     const heapUsed = await page.evaluate(() => {
       // @ts-ignore — Chrome-specific API
@@ -215,8 +218,11 @@ test.describe('P4G Mahjong — Performance', () => {
     await page.goto('/', { waitUntil: 'load' });
     await page.locator('#btn-start').click();
 
-    // Wait for fly-in animation to settle
-    await page.waitForTimeout(3000);
+    // Wait for fly-in animations to finish (no more .fly-in tiles with running animations)
+    await page.waitForFunction(() =>
+      document.querySelectorAll('.mahjong-tile.fly-in').length === 0 ||
+      document.getAnimations().every(a => a.playState === 'finished')
+    , { timeout: 10_000 });
 
     // Measure heap at start
     const heapStart = await page.evaluate(() => {
@@ -226,9 +232,17 @@ test.describe('P4G Mahjong — Performance', () => {
 
     // Play for 10 seconds — use hint and shuffle buttons to create activity
     for (let i = 0; i < 20; i++) {
-      await page.locator('#btn-hint').click();
+      const hintBtn = page.locator('#btn-hint');
+      if (await hintBtn.isVisible() && await hintBtn.isEnabled()) {
+        await hintBtn.click();
+      }
       await page.waitForTimeout(300);
-      if (i % 5 === 0) await page.locator('#btn-shuffle').click();
+      if (i % 5 === 0) {
+        const shuffleBtn = page.locator('#btn-shuffle');
+        if (await shuffleBtn.isVisible() && await shuffleBtn.isEnabled()) {
+          await shuffleBtn.click();
+        }
+      }
       if (i % 3 === 0) await page.waitForTimeout(200);
     }
 

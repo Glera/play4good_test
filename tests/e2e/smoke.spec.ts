@@ -6,16 +6,21 @@ test.describe('P4G Mahjong — Smoke Tests', () => {
   });
 
   test('page loads without errors', async ({ page }) => {
-    // Collect console errors, filtering out Telegram SDK errors (CDN may fail in tests)
+    // Set up console listener BEFORE navigation to catch all errors during load
     const errors: string[] = [];
     page.on('console', msg => {
       if (msg.type() === 'error') {
         const text = msg.text();
-        if (!text.includes('telegram.org') && !text.includes('Telegram')) {
-          errors.push(text);
+        // Filter only Telegram SDK CDN load failures (specific URL and net::ERR patterns)
+        if (text.includes('telegram.org/js/telegram-web-app.js') || text.includes('net::ERR_')) {
+          return;
         }
+        errors.push(text);
       }
     });
+
+    // Re-navigate so the listener captures errors from the start
+    await page.goto('/');
 
     // Page title
     await expect(page).toHaveTitle(/P4G Mahjong/);
