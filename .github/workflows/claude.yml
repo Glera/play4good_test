@@ -53,12 +53,18 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.dev.outputs.branch || 'main' }}
 
-      - name: Ensure dev branch exists
+      - name: Ensure dev branch exists and is up to date with main
         if: steps.dev.outputs.branch != ''
         run: |
           BRANCH="${{ steps.dev.outputs.branch }}"
           if git ls-remote --heads origin "$BRANCH" | grep -q .; then
-            echo "Branch $BRANCH already exists"
+            echo "Branch $BRANCH already exists — merging main into it"
+            git merge origin/main --no-edit || {
+              echo "Merge conflict — resetting to main"
+              git merge --abort
+              git reset --hard origin/main
+            }
+            git push origin "$BRANCH"
           else
             git checkout -b "$BRANCH" origin/main
             git push origin "$BRANCH"
