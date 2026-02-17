@@ -214,7 +214,7 @@ jobs:
           # Send to Telegram
           if [ -f "./notify.sh" ]; then
             REVIEW_SHORT=$(echo "$REVIEW" | head -10)
-            ./notify.sh info "Codex review: $REVIEW_SHORT"
+            ./notify.sh codex_review "Plan review: $REVIEW_SHORT"
           fi
 
       # ============================================================
@@ -337,7 +337,7 @@ jobs:
           # Send to Telegram
           if [ -f "./notify.sh" ]; then
             REVIEW_SHORT=$(echo "$REVIEW" | head -10)
-            ./notify.sh info "Code review: $REVIEW_SHORT"
+            ./notify.sh codex_review "Code review: $REVIEW_SHORT"
           fi
 
           # Check if review found issues
@@ -397,6 +397,10 @@ jobs:
       - name: "Phase 5a: Run smoke tests"
         id: e2e_smoke
         continue-on-error: true
+        env:
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
           if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
@@ -411,14 +415,21 @@ jobs:
 
           if [ $EXIT_CODE -eq 0 ]; then
             echo "SMOKE_OK=true" >> "$GITHUB_ENV"
+            [ -f "./notify.sh" ] && ./notify.sh test_pass "Smoke тесты пройдены"
           else
             echo "SMOKE_OK=false" >> "$GITHUB_ENV"
+            FAILURES=$(grep -E "FAIL|Error|✘" /tmp/smoke-output.txt | head -5)
+            [ -f "./notify.sh" ] && ./notify.sh test_fail "Smoke тесты упали: $FAILURES"
           fi
           exit 0
 
       - name: "Phase 5b: Run performance tests"
         id: e2e_perf
         continue-on-error: true
+        env:
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
           if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
@@ -432,8 +443,11 @@ jobs:
 
           if [ $EXIT_CODE -eq 0 ]; then
             echo "PERF_OK=true" >> "$GITHUB_ENV"
+            [ -f "./notify.sh" ] && ./notify.sh perf_pass "Все бенчмарки в бюджете"
           else
             echo "PERF_OK=false" >> "$GITHUB_ENV"
+            FAILURES=$(grep -E "exceeds|below|grew" /tmp/perf-output.txt | head -5)
+            [ -f "./notify.sh" ] && ./notify.sh perf_fail "Перфоманс регрессия: $FAILURES"
           fi
           exit 0
 
