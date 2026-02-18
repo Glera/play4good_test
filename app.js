@@ -646,8 +646,11 @@ function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDo
 
     function step(now) {
         const tLinear = Math.min((now - startTime) / duration, 1);
-        // Ease-out: tiles decelerate as they approach the meeting point
-        const t = 1 - (1 - tLinear) * (1 - tLinear);
+        // Ease-in-out: tiles accelerate away then decelerate into meeting point.
+        // Ensures tiles reach the exact end position smoothly (no premature stop).
+        const t = tLinear < 0.5
+            ? 2 * tLinear * tLinear
+            : 1 - 2 * (1 - tLinear) * (1 - tLinear);
         // Quadratic Bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
         const inv = 1 - t;
         const inv2 = inv * inv;
@@ -713,15 +716,22 @@ function removePair(a, b) {
     const meetX = (aCx + bCx) / 2;
     const meetY = (aCy + bCy) / 2;
 
-    // Direction vector from A to B (normalized), with fallback for dist≈0
+    // Direction vector from A to B (normalized), with fallback for dist≈0.
+    // Stabilize with minDist to avoid jitter when tiles are very close.
+    const minDist = tileW * 0.5;
+    const safeDist = Math.max(dist, minDist);
     let nx, ny;
     if (dist < 1) {
         nx = 1;
         ny = 0;
     } else {
-        nx = dx / dist;
-        ny = dy / dist;
+        nx = dx / safeDist;
+        ny = dy / safeDist;
     }
+
+    // Perpendicular to A→B direction: used to spread tiles apart
+    const perpX = -ny;
+    const perpY = nx;
 
     // Tiles meet side-by-side along the collision axis.
     // Offset each tile half a tile-width backward along the A→B direction
@@ -733,50 +743,34 @@ function removePair(a, b) {
 
     // Arc trajectory using quadratic Bezier: single control point per tile
     // gives one smooth arc without inflection points (no jerky S-curve).
+    // Each tile arcs to the OPPOSITE side of the A→B line so they
+    // visually fly apart before converging at the meeting point.
 
     // Board layout dimensions (pre-transform). Prefer inline style set by renderBoard;
     // fall back to offsetWidth/offsetHeight which also ignore CSS transforms.
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Vertical and horizontal distances between tile centers
+    // Vertical lift: how high/low the arc peak goes above/below the tiles.
+    // Increased from absDy/4 to absDy/2 for more pronounced arcs.
     const absDy = Math.abs(dy);
-    const absDx = Math.abs(dx);
-
-    // Peak height: choose vertical direction based on available space.
-    // For horizontal pairs (absDy ≈ 0) near the top, arcing upward would
-    // push the apex out of bounds — arc downward instead.
     const minLift = tileH;
     const spaceAbove = Math.min(aCy, bCy);
     const spaceBelow = boardH - Math.max(aCy, bCy);
     const vertSign = spaceAbove >= spaceBelow ? -1 : 1; // -1 = arc up, 1 = arc down
-    const liftAmount = Math.max(absDy / 4, minLift);
-    const peakY = (vertSign === -1)
-        ? Math.min(aCy, bCy) - liftAmount
-        : Math.max(aCy, bCy) + liftAmount;
+    const liftAmount = Math.max(absDy / 2, minLift * 2);
+    const liftY = vertSign * liftAmount;
 
-    // Horizontal offset: 2× horizontal distance, clamped to [5*tileW, boardW - tileW]
-    // Using boardW - tileW prevents the control point from landing at the far edge
-    // on small boards where 5*tileW could exceed boardW.
-    const maxHOffset = Math.max(tileW, boardW - tileW);
-    const minHOffset = Math.min(tileW * 5, maxHOffset);
-    const hOffset = Math.max(minHOffset, Math.min(absDx * 2, maxHOffset));
+    // Spread amount: how far apart the control points are perpendicular to A→B.
+    // Scales with distance between tiles, minimum 2× tile width.
+    const spreadAmount = Math.max(tileW * 2, safeDist * 0.6);
 
-    // Both tiles arc to the same side (toward the midpoint but offset).
-    // Choose direction: arc goes to the side with more space from the board edge.
-    const spaceLeft = meetX;
-    const spaceRight = boardW - meetX;
-    const arcSign = spaceRight >= spaceLeft ? 1 : -1;
-
-    // Control point base position: shared peak with slight divergence per tile
-    // to prevent overlapping trajectories (issue #4)
-    const peakX = meetX + arcSign * hOffset / 2;
-    const diverge = tileW * 0.15; // small offset so the two arcs don't overlap
-
-    let ctrlAx = peakX - tileW / 2 - diverge;
-    let ctrlAy = peakY - tileH / 2 - diverge;
-    let ctrlBx = peakX - tileW / 2 + diverge;
-    let ctrlBy = peakY - tileH / 2 + diverge;
+    // Control points: tile A arcs in +perpendicular direction,
+    // tile B arcs in −perpendicular direction (they fly apart).
+    let ctrlAx = meetX + perpX * spreadAmount - tileW / 2;
+    let ctrlAy = meetY + perpY * spreadAmount - tileH / 2 + liftY;
+    let ctrlBx = meetX - perpX * spreadAmount - tileW / 2;
+    let ctrlBy = meetY - perpY * spreadAmount - tileH / 2 + liftY;
 
     // Clamp control points to board bounds so arcs stay visible
     const pad = tileW * 0.5;
@@ -790,9 +784,8 @@ function removePair(a, b) {
     [ctrlBx, ctrlBy] = clampToBounds(ctrlBx, ctrlBy);
 
     // Duration scales with distance: wider arcs need more time.
-    // Clamped to [300, 500] — must stay ≤ 0.5s to sync with particle-burst
-    // and fly-out CSS animations (both 0.5s).
-    const duration = Math.round(Math.min(500, Math.max(300, 250 + dist * 0.4)));
+    // Increased to [400, 600] for tiles to fully converge before removal.
+    const duration = Math.round(Math.min(600, Math.max(400, 300 + dist * 0.5)));
     let finished = 0;
 
     function onFinish() {
