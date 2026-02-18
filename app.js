@@ -542,14 +542,18 @@ function updateTileStates() {
 function onTileClick(tile) {
     if (!gameRunning || tile.removed) return;
     if (!isTileFree(tile)) {
-        // Shake the blocked tile to indicate it can't be selected
+        // Shake the blocked tile to indicate it can't be selected.
+        // The shake animation runs on .tile-face (inner element) to avoid
+        // conflicting with the outer .mahjong-tile transform (which is used
+        // for hover, fly animations, and zoom). This prevents the "fly away" bug.
         const el = boardEl.querySelector(`[data-id="${tile.id}"]`);
         if (el) {
+            const face = el.querySelector('.tile-face');
             // If already shaking (rapid re-click), clean up first
             if (el._shakeCleanup) {
                 el._shakeCleanup();
             }
-            el.classList.remove('shake', 'no-transition');
+            el.classList.remove('shake');
             // Force reflow so re-adding the class restarts the animation
             void el.offsetWidth;
             el.classList.add('shake');
@@ -559,17 +563,10 @@ function onTileClick(tile) {
             function endShake() {
                 if (cleaned) return;
                 cleaned = true;
-                // Remove both listener and timer to prevent double-fire
-                el.removeEventListener('animationend', handler);
+                if (face) face.removeEventListener('animationend', handler);
                 clearTimeout(timer);
                 el._shakeCleanup = null;
-                // Suppress transitions BEFORE removing shake to prevent
-                // the browser from animating the transform change.
-                // Use a single reflow for both class changes.
-                el.classList.add('no-transition');
                 el.classList.remove('shake');
-                void el.offsetWidth;
-                el.classList.remove('no-transition');
             }
 
             function handler(e) {
@@ -577,7 +574,7 @@ function onTileClick(tile) {
                 endShake();
             }
 
-            el.addEventListener('animationend', handler);
+            if (face) face.addEventListener('animationend', handler);
 
             // Safety timeout: if animationend doesn't fire (WebView quirk),
             // clean up after the CSS animation duration (0.4s) + small margin

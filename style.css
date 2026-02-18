@@ -178,17 +178,13 @@ body {
     cursor: default;
 }
 
-/* Suppresses all transitions — applied by JS before removing .shake to prevent
-   the browser from interpolating between the animation's last computed transform
-   and the base transform (which have different function lists). */
-.mahjong-tile.no-transition {
-    transition: none !important;
-}
-
-.mahjong-tile.blocked.shake {
+/* Shake animation applied to .tile-face (inner element) instead of .mahjong-tile
+   to avoid conflicting with the outer tile's transform (used for hover, fly animations,
+   zoom, etc.). This eliminates the "fly away" bug where removing the shake class
+   caused the browser to transition between mismatched transform function lists. */
+.mahjong-tile.blocked.shake .tile-face {
     animation: tile-shake 0.4s ease-in-out;
     animation-fill-mode: none;
-    transition: none !important;
 }
 
 @keyframes tile-shake {
