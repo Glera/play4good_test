@@ -2,6 +2,24 @@
 
 История изменений для cherry-pick в main.
 
+## #123 — Все еще актуальна проблема, и заблокированный тайл сейчас делает несколько итера
+**Дата:** 2026-02-18
+**Ветка:** dev/Gleb
+**Коммит:** `dcfc1c3`
+**Статус:** ✅ готово к переносу
+
+### Изменённые файлы
+- `app.js`
+- `style.css`
+
+### Как перенести в main
+```bash
+git cherry-pick dcfc1c31abb44143cc26c95307642b552055a1bb
+```
+
+---
+
+
 ## #123 — Blocked tile shake animation still causes "fly away" after previous fixes
 **Дата:** 2026-02-18
 **Ветка:** dev/Gleb
