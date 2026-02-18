@@ -129,7 +129,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\",\"options\":{\"multi_agent\":\"${{ steps.dev.outputs.multi_agent }}\",\"testing\":\"${{ steps.dev.outputs.testing }}\",\"approve\":\"${{ steps.dev.outputs.approve }}\"}}"
 
       # ============================================================
       # PHASE 1: PLAN (Claude writes a plan)
@@ -280,63 +280,124 @@ jobs:
         if: steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
         run: |
-          # Send plan summary to bot for approval
-          PLAN_TEXT=""
-          if [ -f /tmp/plan.md ]; then
-            PLAN_TEXT=$(cat /tmp/plan.md | head -30)
-          fi
+          BRANCH=$(git branch --show-current)
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          MAX_REVISIONS=3
+          REVISION=0
 
-          CODEX_TEXT=""
-          if [ -f /tmp/codex-plan-review.txt ]; then
-            CODEX_TEXT=$(head -10 /tmp/codex-plan-review.txt)
-          fi
+          while [ $REVISION -le $MAX_REVISIONS ]; do
+            # Build plan summary for approval
+            PLAN_TEXT=""
+            if [ -f /tmp/plan.md ]; then
+              PLAN_TEXT=$(cat /tmp/plan.md | head -30)
+            fi
 
-          SUMMARY="${PLAN_TEXT}"
-          if [ -n "$CODEX_TEXT" ]; then
-            SUMMARY="${SUMMARY}\n\n--- Codex Review ---\n${CODEX_TEXT}"
-          fi
+            CODEX_TEXT=""
+            if [ -f /tmp/codex-plan-review.txt ]; then
+              CODEX_TEXT=$(head -10 /tmp/codex-plan-review.txt)
+            fi
 
-          # Request approval via bot (sends Telegram message with buttons)
-          # Use jq for safe JSON encoding
-          JSON_BODY=$(jq -n \
-            --arg branch "$DEV_BRANCH" \
-            --arg issue_number "$ISSUE_NUMBER" \
-            --arg plan_summary "$SUMMARY" \
-            '{branch: $branch, issue_number: $issue_number, plan_summary: $plan_summary}')
+            SUMMARY="${PLAN_TEXT}"
+            if [ -n "$CODEX_TEXT" ]; then
+              SUMMARY="${SUMMARY}\n\n--- Codex Review ---\n${CODEX_TEXT}"
+            fi
 
-          curl -s -X POST "$BOT_NOTIFY_URL/ci/request-approval" \
-            -H "Content-Type: application/json" \
-            -d "$JSON_BODY"
+            if [ $REVISION -gt 0 ]; then
+              SUMMARY="[Ревизия ${REVISION}/${MAX_REVISIONS}]\n\n${SUMMARY}"
+            fi
 
-          echo "⏳ Waiting for developer approval (max 15 min)..."
+            # Request approval via bot
+            JSON_BODY=$(jq -n \
+              --arg branch "$DEV_BRANCH" \
+              --arg issue_number "$ISSUE_NUMBER" \
+              --arg plan_summary "$SUMMARY" \
+              '{branch: $branch, issue_number: $issue_number, plan_summary: $plan_summary}')
 
-          # Poll for approval every 30 seconds, up to 30 attempts (15 min)
-          for i in $(seq 1 30); do
-            sleep 30
-            RESULT=$(curl -s "$BOT_NOTIFY_URL/ci/check-approval?branch=$DEV_BRANCH&issue_number=$ISSUE_NUMBER")
-            STATUS=$(echo "$RESULT" | jq -r '.status')
+            curl -s -X POST "$BOT_NOTIFY_URL/ci/request-approval" \
+              -H "Content-Type: application/json" \
+              -d "$JSON_BODY"
 
-            if [ "$STATUS" = "approved" ]; then
-              echo "✅ Plan approved by developer"
-              echo "PLAN_APPROVED=true" >> "$GITHUB_ENV"
-              exit 0
-            elif [ "$STATUS" = "rejected" ]; then
-              echo "❌ Plan rejected by developer"
+            echo "⏳ Waiting for developer approval (max 15 min)..."
+
+            # Poll for approval every 30 seconds, up to 30 attempts (15 min)
+            DECISION=""
+            for i in $(seq 1 30); do
+              sleep 30
+              RESULT=$(curl -s "$BOT_NOTIFY_URL/ci/check-approval?branch=$DEV_BRANCH&issue_number=$ISSUE_NUMBER")
+              STATUS=$(echo "$RESULT" | jq -r '.status')
+
+              if [ "$STATUS" = "approved" ]; then
+                echo "✅ Plan approved by developer"
+                echo "PLAN_APPROVED=true" >> "$GITHUB_ENV"
+                exit 0
+              elif [ "$STATUS" = "rejected" ]; then
+                echo "❌ Plan rejected by developer"
+                echo "PLAN_APPROVED=false" >> "$GITHUB_ENV"
+                ./notify.sh error "План отклонён разработчиком. CI остановлен."
+                exit 1
+              elif [ "$STATUS" = "revision" ]; then
+                FEEDBACK=$(echo "$RESULT" | jq -r '.feedback // ""')
+                echo "✏️ Developer requested revision: $FEEDBACK"
+                DECISION="revision"
+                break
+              fi
+              echo "⏳ Waiting... ($i/30)"
+            done
+
+            if [ "$DECISION" != "revision" ]; then
+              echo "⏰ Approval timeout (15 min) — stopping CI"
               echo "PLAN_APPROVED=false" >> "$GITHUB_ENV"
-              ./notify.sh error "План отклонён разработчиком. CI остановлен."
+              ./notify.sh error "Таймаут ожидания апрува плана (15 мин). CI остановлен."
               exit 1
             fi
-            echo "⏳ Waiting... ($i/30)"
-          done
 
-          echo "⏰ Approval timeout (15 min) — stopping CI"
-          echo "PLAN_APPROVED=false" >> "$GITHUB_ENV"
-          ./notify.sh error "Таймаут ожидания апрува плана (15 мин). CI остановлен."
-          exit 1
+            # --- Revision: Claude re-plans with feedback ---
+            REVISION=$((REVISION + 1))
+            if [ $REVISION -gt $MAX_REVISIONS ]; then
+              echo "Max revisions reached ($MAX_REVISIONS)"
+              echo "PLAN_APPROVED=false" >> "$GITHUB_ENV"
+              ./notify.sh error "Превышен лимит ревизий плана ($MAX_REVISIONS). CI остановлен."
+              exit 1
+            fi
+
+            echo "=== Revision $REVISION: Re-planning with feedback ==="
+
+            CURRENT_PLAN=$(cat /tmp/plan.md 2>/dev/null || echo "")
+
+            cat > /tmp/revise-prompt.txt << REVISE_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          TASK: Revise the implementation plan for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
+
+          YOUR PREVIOUS PLAN:
+          ${CURRENT_PLAN}
+
+          DEVELOPER FEEDBACK (address these concerns):
+          ${FEEDBACK}
+
+          INSTRUCTIONS:
+          1. Read the developer's feedback carefully
+          2. Revise your plan in /tmp/plan.md addressing their concerns
+          3. Run: ./notify.sh progress "Revised plan based on feedback"
+          4. DO NOT implement anything — only update the plan
+          5. Stay on the current branch
+          REVISE_EOF
+
+            claude -p --dangerously-skip-permissions \
+              --model claude-opus-4-6 \
+              --max-turns 10 \
+              --verbose \
+              "$(cat /tmp/revise-prompt.txt)" 2>&1 | tee /tmp/revision-output.txt
+
+            echo "Plan revised, requesting approval again..."
+          done
 
       # ============================================================
       # PHASE 3: IMPLEMENT (Claude implements with plan + review)
@@ -969,11 +1030,6 @@ jobs:
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
             -d "{\"event\":\"merged\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
-
-          # Send test status via notify.sh
-          if [ -f "./notify.sh" ]; then
-            ./notify.sh done "$TEST_STATUS. Task complete."
-          fi
 
       - name: Close issue
         if: always() && steps.verify.outputs.pushed == 'true'
