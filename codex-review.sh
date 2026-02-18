@@ -72,9 +72,8 @@ fi
 
 # Extract text — try multiple response formats
 TEXT=$(echo "$BODY" | jq -r '
-  .output //
   .output_text //
-  (.output[]? | select(.type == "message") | .content[]? | select(.type == "output_text") | .text) //
+  ([.output[]? | select(.type == "message") | .content[]? | select(.type == "output_text") | .text] | join("\n")) //
   .choices[0].message.content //
   "Review unavailable"
 ' 2>/dev/null || echo "Review parse error")

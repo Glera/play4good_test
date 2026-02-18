@@ -135,6 +135,14 @@ jobs:
       # PHASE 1: PLAN (Claude writes a plan)
       # ============================================================
 
+      - name: "Track: Phase 1"
+        if: steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Планирование\",\"phase_num\":\"1\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+
       - name: "Phase 1: Plan"
         id: plan
         continue-on-error: true
@@ -199,7 +207,7 @@ jobs:
 
       # --- Notify: Plan created ---
       - name: "Notify: Phase 1 — Plan"
-        if: env.PLAN_CREATED == 'true'
+        if: env.PLAN_CREATED == 'true' && steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -212,6 +220,14 @@ jobs:
       # ============================================================
       # PHASE 2: CODEX REVIEW (Codex 5.2 reviews the plan)
       # ============================================================
+
+      - name: "Track: Phase 2"
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Codex ревью\",\"phase_num\":\"2\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 2: Codex plan review"
         id: codex_plan
@@ -241,7 +257,7 @@ jobs:
 
       # --- Notify: Codex plan review ---
       - name: "Notify: Phase 2 — Codex plan review"
-        if: steps.dev.outputs.multi_agent == 'true'
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -325,6 +341,14 @@ jobs:
       # ============================================================
       # PHASE 3: IMPLEMENT (Claude implements with plan + review)
       # ============================================================
+
+      - name: "Track: Phase 3"
+        if: steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Реализация\",\"phase_num\":\"3\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 3: Implement"
         id: implement
@@ -412,6 +436,7 @@ jobs:
 
       # --- Notify: Phase 3 result ---
       - name: "Notify: Phase 3 — Implementation"
+        if: steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -430,6 +455,14 @@ jobs:
       # ============================================================
       # PHASE 4: CODE REVIEW (Codex reviews the diff)
       # ============================================================
+
+      - name: "Track: Phase 4"
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Код ревью\",\"phase_num\":\"4\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 4: Codex code review"
         id: codex_code
@@ -466,7 +499,7 @@ jobs:
 
       # --- Notify: Codex code review ---
       - name: "Notify: Phase 4 — Codex code review"
-        if: steps.dev.outputs.multi_agent == 'true'
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -529,7 +562,7 @@ jobs:
 
       # --- Notify: Phase 4 fix result ---
       - name: "Notify: Phase 4 — Fix applied"
-        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false'
+        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false' && steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -545,6 +578,14 @@ jobs:
       # ============================================================
       # PHASE 5: SMOKE TESTS + PERFORMANCE
       # ============================================================
+
+      - name: "Track: Phase 5"
+        if: steps.dev.outputs.testing == 'true' && steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Тестирование\",\"phase_num\":\"5\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 5a: Run smoke tests"
         id: e2e_smoke
@@ -800,6 +841,14 @@ jobs:
       # ============================================================
       # VERIFY & FINALIZE
       # ============================================================
+
+      - name: "Track: Финализация"
+        if: always() && steps.dev.outputs.branch != ''
+        continue-on-error: true
+        run: |
+          curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
+            -H "Content-Type: application/json" \
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Финализация\",\"phase_num\":\"6\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: Verify actual push
         if: always()
