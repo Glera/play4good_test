@@ -717,26 +717,27 @@ function removePair(a, b) {
     const meetX = (aCx + bCx) / 2;
     const meetY = (aCy + bCy) / 2;
 
-    // Tiles meet side-by-side (touching edges) instead of overlapping.
-    // Tile A stops with its right edge at meetX, tile B with its left edge at meetX.
-    const endAx = meetX - tileW;
-    const endAy = meetY - tileH / 2;
-    const endBx = meetX;
-    const endBy = meetY - tileH / 2;
-
-    // Arc trajectory using cubic Bezier: tiles spread apart in a wide arc,
-    // then converge horizontally for a side-collision effect.
-
     // Direction vector from A to B (normalized), with fallback for dist≈0
     let nx, ny;
     if (dist < 1) {
-        // Tiles nearly overlapping — use arbitrary perpendicular direction
         nx = 1;
         ny = 0;
     } else {
         nx = dx / dist;
         ny = dy / dist;
     }
+
+    // Tiles meet side-by-side along the collision axis.
+    // Offset each tile half a tile-width backward along the A→B direction
+    // so they touch at meetX/meetY without overlapping or crossing.
+    const endAx = meetX - nx * tileW / 2 - tileW / 2;
+    const endAy = meetY - ny * tileW / 2 - tileH / 2;
+    const endBx = meetX + nx * tileW / 2 - tileW / 2;
+    const endBy = meetY + ny * tileW / 2 - tileH / 2;
+
+    // Arc trajectory using cubic Bezier: tiles spread apart in a wide arc,
+    // then converge along the collision axis.
+
     // Perpendicular to the line connecting A→B
     const px = -ny;
     const py = nx;
@@ -757,16 +758,16 @@ function removePair(a, b) {
     let ctrl1Bx = bx - px * spread + nx * pushBack;
     let ctrl1By = by - py * spread + ny * pushBack;
 
-    // Control point 2: ensure horizontal approach to the meeting point.
-    // Place ctrl2 on the same Y as the endpoint, offset horizontally outward.
+    // Control point 2: ensure approach along the collision axis (A→B direction).
+    // Place ctrl2 on the same plane as the endpoint, offset outward along -nx/+nx.
     const approachDist = Math.max(tileRef * 2, dist * 0.5);
-    let ctrl2Ax = endAx - approachDist;
-    let ctrl2Ay = endAy;
-    let ctrl2Bx = endBx + approachDist;
-    let ctrl2By = endBy;
+    let ctrl2Ax = endAx - nx * approachDist;
+    let ctrl2Ay = endAy - ny * approachDist;
+    let ctrl2Bx = endBx + nx * approachDist;
+    let ctrl2By = endBy + ny * approachDist;
 
     // Clamp all control points to board bounds so arcs don't fly outside the field
-    const pad = tileW;
+    const pad = tileW * 0.5;
     function clampToBounds(cx, cy) {
         return [
             Math.max(-pad, Math.min(boardW + pad, cx)),
@@ -779,8 +780,9 @@ function removePair(a, b) {
     [ctrl2Bx, ctrl2By] = clampToBounds(ctrl2Bx, ctrl2By);
 
     // Duration scales with distance: wider arcs need more time.
-    // Clamped to [400, 650] for a smooth, visible trajectory.
-    const duration = Math.round(Math.min(650, Math.max(400, 350 + dist * 0.5)));
+    // Clamped to [300, 500] — must stay ≤ 0.5s to sync with particle-burst
+    // and fly-out CSS animations (both 0.5s).
+    const duration = Math.round(Math.min(500, Math.max(300, 250 + dist * 0.4)));
     let finished = 0;
 
     function onFinish() {
