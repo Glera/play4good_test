@@ -185,6 +185,9 @@ body {
 .mahjong-tile.blocked.shake .tile-face {
     animation: tile-shake 0.4s ease-in-out;
     animation-fill-mode: none;
+    /* Disable transitions during shake so they don't interpolate with the
+       animation's transform keyframes (avoids jittering on iOS WebView). */
+    transition: none;
 }
 
 @keyframes tile-shake {

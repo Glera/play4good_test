@@ -549,6 +549,9 @@ function onTileClick(tile) {
         const el = boardEl.querySelector(`[data-id="${tile.id}"]`);
         if (el) {
             const face = el.querySelector('.tile-face');
+            // If no .tile-face exists (e.g. special tile variant), skip shake
+            if (!face) return;
+
             // If already shaking (rapid re-click), clean up first
             if (el._shakeCleanup) {
                 el._shakeCleanup();
@@ -563,7 +566,7 @@ function onTileClick(tile) {
             function endShake() {
                 if (cleaned) return;
                 cleaned = true;
-                if (face) face.removeEventListener('animationend', handler);
+                face.removeEventListener('animationend', handler);
                 clearTimeout(timer);
                 el._shakeCleanup = null;
                 el.classList.remove('shake');
@@ -574,7 +577,7 @@ function onTileClick(tile) {
                 endShake();
             }
 
-            if (face) face.addEventListener('animationend', handler);
+            face.addEventListener('animationend', handler);
 
             // Safety timeout: if animationend doesn't fire (WebView quirk),
             // clean up after the CSS animation duration (0.4s) + small margin
