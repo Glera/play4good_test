@@ -2,6 +2,42 @@
 
 История изменений для cherry-pick в main.
 
+## #128 — хочу протестировать апрув тикета еще раз
+**Дата:** 2026-02-18
+**Ветка:** dev/Gleb
+**Коммит:** `c329a84`
+**Статус:** ✅ готово к переносу
+
+### Что сделано
+Верификационный тикет для повторного тестирования Approval Gate workflow (ci:approve + ci:multi-agent + ci:testing). Проверен полный CI pipeline включая: Phase 1 (план) → Phase 2 (Codex ревью) → Approval Gate с ревизией плана → Phase 3 (реализация) → Phase 4 (code review) → Phase 5 (тесты). Ревизия плана через Telegram подтвердила работоспособность механизма поправок (макс 3 ревизии).
+
+### Результаты тестов
+- **Smoke tests:** 14/14 passed (chrome + mobile) за 8.8s
+- **Performance tests:** 16/16 passed (chrome + mobile) за 30.7s
+- DOMContentLoaded: 584-627ms (бюджет < 2000ms)
+- Page weight: 168 KB (бюджет < 500 KB)
+- JS heap: 9.5 MB (бюджет < 30 MB)
+- CLS: 0.0000 (бюджет < 0.1)
+- FPS: 60.1-60.3 (бюджет > 30)
+- Memory leak: 0.00 MB за 10s (бюджет < 5 MB)
+- Input response: 45-49ms (бюджет < 500ms)
+
+### Проверка Approval Gate workflow
+- CI: ci:approve label → request-approval → polling 30s/15min → approved/revised
+- Revision: разработчик отправил тестовую поправку, Claude пересоздал план (ревизия 1 из 3)
+- Codex review: план проверен, замечания учтены в реализации
+- notify.sh: уведомления о прогрессе доставлены в Telegram
+
+### Изменённые файлы
+- `DEVLOG.md` — добавлена запись о верификации Approval Gate workflow
+
+### Как перенести в main
+```bash
+git cherry-pick c329a849e9f84b4b479da061152067a83c3f0ea6
+```
+
+---
+
 ## #127 — хочу протестировать правку из телеги итогового плана разработки тикета
 **Дата:** 2026-02-18
 **Ветка:** dev/Gleb
