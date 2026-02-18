@@ -270,8 +270,8 @@ function calculateZoom() {
     const contentH = maxY - minY;
     if (contentW <= 0 || contentH <= 0) return { scale: 1, translateX: 0, translateY: 0 };
 
-    const boardW = parseFloat(boardEl.style.width) || 1;
-    const boardH = parseFloat(boardEl.style.height) || 1;
+    const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
+    const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
     const boardArea = document.querySelector('.game-board-area');
     const availW = boardArea.clientWidth - 4;
@@ -734,21 +734,32 @@ function removePair(a, b) {
     // Arc trajectory using quadratic Bezier: single control point per tile
     // gives one smooth arc without inflection points (no jerky S-curve).
 
-    // Board dimensions for bounds clamping
-    const boardW = parseFloat(boardEl.style.width) || 1;
-    const boardH = parseFloat(boardEl.style.height) || 1;
+    // Board layout dimensions (pre-transform). Prefer inline style set by renderBoard;
+    // fall back to offsetWidth/offsetHeight which also ignore CSS transforms.
+    const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
+    const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
     // Vertical and horizontal distances between tile centers
     const absDy = Math.abs(dy);
     const absDx = Math.abs(dx);
 
-    // Peak height: 1/4 of vertical distance above the higher tile, with min fallback
+    // Peak height: choose vertical direction based on available space.
+    // For horizontal pairs (absDy ≈ 0) near the top, arcing upward would
+    // push the apex out of bounds — arc downward instead.
     const minLift = tileH;
-    const peakY = Math.min(aCy, bCy) - Math.max(absDy / 4, minLift);
+    const spaceAbove = Math.min(aCy, bCy);
+    const spaceBelow = boardH - Math.max(aCy, bCy);
+    const vertSign = spaceAbove >= spaceBelow ? -1 : 1; // -1 = arc up, 1 = arc down
+    const liftAmount = Math.max(absDy / 4, minLift);
+    const peakY = (vertSign === -1)
+        ? Math.min(aCy, bCy) - liftAmount
+        : Math.max(aCy, bCy) + liftAmount;
 
-    // Horizontal offset: 2× horizontal distance, clamped to [5*tileW, boardW]
-    const minHOffset = tileW * 5;
-    const maxHOffset = boardW;
+    // Horizontal offset: 2× horizontal distance, clamped to [5*tileW, boardW - tileW]
+    // Using boardW - tileW prevents the control point from landing at the far edge
+    // on small boards where 5*tileW could exceed boardW.
+    const maxHOffset = Math.max(tileW, boardW - tileW);
+    const minHOffset = Math.min(tileW * 5, maxHOffset);
     const hOffset = Math.max(minHOffset, Math.min(absDx * 2, maxHOffset));
 
     // Both tiles arc to the same side (toward the midpoint but offset).
@@ -757,14 +768,15 @@ function removePair(a, b) {
     const spaceRight = boardW - meetX;
     const arcSign = spaceRight >= spaceLeft ? 1 : -1;
 
-    // Single control point for each tile: shared peak position
-    // Both tiles curve through the same apex for a cohesive visual
+    // Control point base position: shared peak with slight divergence per tile
+    // to prevent overlapping trajectories (issue #4)
     const peakX = meetX + arcSign * hOffset / 2;
+    const diverge = tileW * 0.15; // small offset so the two arcs don't overlap
 
-    let ctrlAx = peakX - tileW / 2;
-    let ctrlAy = peakY - tileH / 2;
-    let ctrlBx = peakX - tileW / 2;
-    let ctrlBy = peakY - tileH / 2;
+    let ctrlAx = peakX - tileW / 2 - diverge;
+    let ctrlAy = peakY - tileH / 2 - diverge;
+    let ctrlBx = peakX - tileW / 2 + diverge;
+    let ctrlBy = peakY - tileH / 2 + diverge;
 
     // Clamp control points to board bounds so arcs stay visible
     const pad = tileW * 0.5;
