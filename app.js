@@ -759,9 +759,9 @@ function checkGameState() {
 
     if (remaining === 0) {
         gameRunning = false;
-        score += 1000; // Bonus for winning
+        score += 1500; // Bonus for winning
         updateUI();
-        overlayTitle.textContent = 'YOU WIN!';
+        overlayTitle.textContent = 'YOU WIN! 🏆';
         overlayMessage.textContent = `Score: ${score} | Matches: ${moves}`;
         startBtn.textContent = 'Play Again';
         overlay.classList.remove('hidden');
