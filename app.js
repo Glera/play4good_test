@@ -647,7 +647,6 @@ function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDo
     function step(now) {
         const tLinear = Math.min((now - startTime) / duration, 1);
         // Ease-in-out: tiles accelerate away then decelerate into meeting point.
-        // Ensures tiles reach the exact end position smoothly (no premature stop).
         const t = tLinear < 0.5
             ? 2 * tLinear * tLinear
             : 1 - 2 * (1 - tLinear) * (1 - tLinear);
@@ -717,16 +716,15 @@ function removePair(a, b) {
     const meetY = (aCy + bCy) / 2;
 
     // Direction vector from A to B (normalized), with fallback for dist≈0.
-    // Stabilize with minDist to avoid jitter when tiles are very close.
-    const minDist = tileW * 0.5;
-    const safeDist = Math.max(dist, minDist);
+    // Always normalize by actual dist to preserve unit-length direction;
+    // using a larger safeDist would shrink nx/ny and cause tiles to overlap.
     let nx, ny;
     if (dist < 1) {
         nx = 1;
         ny = 0;
     } else {
-        nx = dx / safeDist;
-        ny = dy / safeDist;
+        nx = dx / dist;
+        ny = dy / dist;
     }
 
     // Perpendicular to A→B direction: used to spread tiles apart
@@ -752,18 +750,19 @@ function removePair(a, b) {
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
     // Vertical lift: how high/low the arc peak goes above/below the tiles.
-    // Increased from absDy/4 to absDy/2 for more pronounced arcs.
-    const absDy = Math.abs(dy);
+    // Use the perpendicular distance component so diagonal pairs don't
+    // produce excessively tall arcs that break after clamping.
     const minLift = tileH;
     const spaceAbove = Math.min(aCy, bCy);
     const spaceBelow = boardH - Math.max(aCy, bCy);
     const vertSign = spaceAbove >= spaceBelow ? -1 : 1; // -1 = arc up, 1 = arc down
-    const liftAmount = Math.max(absDy / 2, minLift * 2);
-    const liftY = vertSign * liftAmount;
+    const rawLift = Math.max(dist * 0.25, minLift);
+    const maxLift = Math.max(spaceAbove, spaceBelow) * 0.8;
+    const liftY = vertSign * Math.min(rawLift, maxLift);
 
     // Spread amount: how far apart the control points are perpendicular to A→B.
     // Scales with distance between tiles, minimum 2× tile width.
-    const spreadAmount = Math.max(tileW * 2, safeDist * 0.6);
+    const spreadAmount = Math.max(tileW * 2, dist * 0.6);
 
     // Control points: tile A arcs in +perpendicular direction,
     // tile B arcs in −perpendicular direction (they fly apart).
@@ -784,8 +783,8 @@ function removePair(a, b) {
     [ctrlBx, ctrlBy] = clampToBounds(ctrlBx, ctrlBy);
 
     // Duration scales with distance: wider arcs need more time.
-    // Increased to [400, 600] for tiles to fully converge before removal.
-    const duration = Math.round(Math.min(600, Math.max(400, 300 + dist * 0.5)));
+    // Capped at 500ms to stay in sync with particle-burst CSS animation (0.5s).
+    const duration = Math.round(Math.min(500, Math.max(350, 300 + dist * 0.4)));
     let finished = 0;
 
     function onFinish() {
