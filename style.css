@@ -178,18 +178,18 @@ body {
     cursor: default;
 }
 
-.mahjong-tile.shake {
+.mahjong-tile.blocked.shake {
     animation: tile-shake 0.4s ease-in-out;
-    transition: none !important;
+    transition: transform 0s;
 }
 
 @keyframes tile-shake {
-    0%   { transform: translateX(0) translateZ(0); }
+    0%   { transform: translateX(0) rotate(0deg) translateZ(0); }
     20%  { transform: translateX(-3px) rotate(-1deg) translateZ(0); }
     40%  { transform: translateX(3px) rotate(1deg) translateZ(0); }
     60%  { transform: translateX(-2px) rotate(-0.5deg) translateZ(0); }
     80%  { transform: translateX(2px) rotate(0.5deg) translateZ(0); }
-    100% { transform: translateX(0) translateZ(0); }
+    100% { transform: translateX(0) rotate(0deg) translateZ(0); }
 }
 
 .mahjong-tile.blocked .tile-face {
