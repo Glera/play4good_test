@@ -188,6 +188,18 @@ jobs:
             tail -50 /tmp/phase1-output.txt >> /tmp/plan.md
           fi
 
+      # --- Notify: Plan created ---
+      - name: "Notify: Phase 1 — Plan"
+        if: env.PLAN_CREATED == 'true'
+        continue-on-error: true
+        env:
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+        run: |
+          PLAN_TEXT=$(head -20 /tmp/plan.md 2>/dev/null || echo "Plan file not found")
+          ./notify.sh plan "Phase 1 — План Claude:\n\n$PLAN_TEXT"
+
       # ============================================================
       # PHASE 2: CODEX REVIEW (Codex 5.2 reviews the plan)
       # ============================================================
@@ -217,10 +229,19 @@ jobs:
           echo "=== Codex review ==="
           echo "$REVIEW"
 
-          # Send to Telegram
-          if [ -f "./notify.sh" ]; then
-            REVIEW_SHORT=$(echo "$REVIEW" | head -10)
-            ./notify.sh codex_review "Plan review: $REVIEW_SHORT"
+      # --- Notify: Codex plan review ---
+      - name: "Notify: Phase 2 — Codex plan review"
+        continue-on-error: true
+        env:
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+        run: |
+          if [ -f /tmp/codex-plan-review.txt ]; then
+            REVIEW=$(head -30 /tmp/codex-plan-review.txt)
+            ./notify.sh codex_review "Phase 2 — Codex ревью плана:\n\n$REVIEW"
+          else
+            ./notify.sh info "Phase 2 — Codex ревью пропущено (нет плана)"
           fi
 
       # ============================================================
@@ -311,6 +332,23 @@ jobs:
             --max-turns 30 \
             --verbose
 
+      # --- Notify: Phase 3 result ---
+      - name: "Notify: Phase 3 — Implementation"
+        continue-on-error: true
+        env:
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" != "$INITIAL_SHA" ]; then
+            CHANGES=$(git log --oneline "$INITIAL_SHA"..HEAD | head -5)
+            FILES=$(git diff --name-only "$INITIAL_SHA"..HEAD | head -10)
+            ./notify.sh progress "Phase 3 — Claude реализовал:\n\nКоммиты:\n$CHANGES\n\nФайлы:\n$FILES"
+          else
+            ./notify.sh error "Phase 3 — Claude не создал коммитов"
+          fi
+
       # ============================================================
       # PHASE 4: CODE REVIEW (Codex reviews the diff)
       # ============================================================
@@ -340,17 +378,30 @@ jobs:
           echo "=== Codex code review ==="
           echo "$REVIEW"
 
-          # Send to Telegram
-          if [ -f "./notify.sh" ]; then
-            REVIEW_SHORT=$(echo "$REVIEW" | head -10)
-            ./notify.sh codex_review "Code review: $REVIEW_SHORT"
-          fi
-
           # Check if review found issues
           if echo "$REVIEW" | grep -qi "выглядит хорошо\|looks good\|no issues"; then
             echo "CODE_REVIEW_OK=true" >> "$GITHUB_ENV"
           else
             echo "CODE_REVIEW_OK=false" >> "$GITHUB_ENV"
+          fi
+
+      # --- Notify: Codex code review ---
+      - name: "Notify: Phase 4 — Codex code review"
+        continue-on-error: true
+        env:
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+        run: |
+          if [ -f /tmp/codex-code-review.txt ]; then
+            REVIEW=$(head -30 /tmp/codex-code-review.txt)
+            if [ "$CODE_REVIEW_OK" = "true" ]; then
+              ./notify.sh codex_review "Phase 4 — Codex: код ОК\n\n$REVIEW"
+            else
+              ./notify.sh codex_review "Phase 4 — Codex нашёл замечания:\n\n$REVIEW"
+            fi
+          else
+            ./notify.sh info "Phase 4 — Codex ревью пропущено (нет изменений)"
           fi
 
       # Fix issues found by code review (one pass)
@@ -395,6 +446,21 @@ jobs:
             --max-turns 20 \
             --verbose \
             "$(cat /tmp/fix-prompt.txt)"
+
+      # --- Notify: Phase 4 fix result ---
+      - name: "Notify: Phase 4 — Fix applied"
+        if: env.CODE_REVIEW_OK == 'false'
+        continue-on-error: true
+        env:
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+        run: |
+          if [ "${{ steps.fix_review.outcome }}" = "success" ]; then
+            ./notify.sh progress "Phase 4 — Claude исправил замечания Codex"
+          else
+            ./notify.sh error "Phase 4 — Claude не смог исправить замечания"
+          fi
 
       # ============================================================
       # PHASE 5: SMOKE TESTS + PERFORMANCE
