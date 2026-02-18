@@ -545,15 +545,40 @@ function onTileClick(tile) {
         // Shake the blocked tile to indicate it can't be selected
         const el = boardEl.querySelector(`[data-id="${tile.id}"]`);
         if (el) {
-            el.classList.remove('shake');
+            // If already shaking (rapid re-click), clean up first
+            if (el._shakeTimer) {
+                clearTimeout(el._shakeTimer);
+                el._shakeTimer = null;
+            }
+            el.classList.remove('shake', 'no-transition');
             // Force reflow so re-adding the class restarts the animation
             void el.offsetWidth;
             el.classList.add('shake');
+
+            function endShake() {
+                if (el._shakeTimer) {
+                    clearTimeout(el._shakeTimer);
+                    el._shakeTimer = null;
+                }
+                // Suppress transitions BEFORE removing shake to prevent
+                // the browser from animating the transform change
+                el.classList.add('no-transition');
+                el.classList.remove('shake');
+                // Force reflow so the browser applies no-transition + removed shake
+                void el.offsetWidth;
+                // Now safe to re-enable transitions
+                el.classList.remove('no-transition');
+            }
+
             el.addEventListener('animationend', function handler(e) {
                 if (e.animationName !== 'tile-shake') return;
                 el.removeEventListener('animationend', handler);
-                el.classList.remove('shake');
+                endShake();
             });
+
+            // Safety timeout: if animationend doesn't fire (WebView quirk),
+            // clean up after the animation duration + margin
+            el._shakeTimer = setTimeout(endShake, 500);
         }
         return;
     }

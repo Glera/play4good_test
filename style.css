@@ -178,18 +178,26 @@ body {
     cursor: default;
 }
 
+/* Suppresses all transitions — applied by JS before removing .shake to prevent
+   the browser from interpolating between the animation's last computed transform
+   and the base transform (which have different function lists). */
+.mahjong-tile.no-transition {
+    transition: none !important;
+}
+
 .mahjong-tile.blocked.shake {
     animation: tile-shake 0.4s ease-in-out;
-    transition: transform 0s;
+    animation-fill-mode: none;
+    transition: none !important;
 }
 
 @keyframes tile-shake {
-    0%   { transform: translateX(0) rotate(0deg) translateZ(0); }
+    0%   { transform: translateZ(0); }
     20%  { transform: translateX(-3px) rotate(-1deg) translateZ(0); }
     40%  { transform: translateX(3px) rotate(1deg) translateZ(0); }
     60%  { transform: translateX(-2px) rotate(-0.5deg) translateZ(0); }
     80%  { transform: translateX(2px) rotate(0.5deg) translateZ(0); }
-    100% { transform: translateX(0) rotate(0deg) translateZ(0); }
+    100% { transform: translateZ(0); }
 }
 
 .mahjong-tile.blocked .tile-face {

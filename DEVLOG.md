@@ -2,6 +2,26 @@
 
 История изменений для cherry-pick в main.
 
+## #123 — Blocked tile shake animation still causes "fly away" after previous fixes
+**Дата:** 2026-02-18
+**Ветка:** dev/Gleb
+**Коммит:** `ba97808`
+**Статус:** ✅ готово к переносу
+
+### Что сделано
+Fixed the root cause of the blocked tile "fly away" bug: the `@keyframes tile-shake` end state used `translateX(0) rotate(0deg) translateZ(0)` which is a different transform function list than the base tile's `translateZ(0)`. When the `.shake` class was removed, the browser interpolated between these mismatched function lists causing the tile to fly. Fix: matched keyframe 0%/100% to base transform (`translateZ(0)`), added `.no-transition` CSS class (instead of inline styles per Codex review) applied before removing `.shake`, and added a 500ms safety timeout for `animationend` in case it doesn't fire in WebView.
+
+### Изменённые файлы
+- `style.css` — Added `.no-transition` utility class, set `animation-fill-mode: none` and `transition: none !important` on `.shake`, fixed keyframe 0%/100% to match base transform exactly
+- `app.js` — Refactored shake handler: uses `.no-transition` CSS class instead of inline styles, added timeout fallback, handles rapid re-clicks
+
+### Как перенести в main
+```
+git cherry-pick ba978084ea9c51f6a3e0471088965b065aea69f8
+```
+
+---
+
 ## #122 — Сейчас, когда кликаю по заблокированному тайлу, то он куда-то убегает, меняет си
 **Дата:** 2026-02-18
 **Ветка:** dev/Gleb
