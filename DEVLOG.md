@@ -2,6 +2,41 @@
 
 История изменений для cherry-pick в main.
 
+## #127 — хочу протестировать правку из телеги итогового плана разработки тикета
+**Дата:** 2026-02-18
+**Ветка:** dev/Gleb
+**Коммит:** `fb9030e`
+**Статус:** ✅ готово к переносу
+
+### Что сделано
+Верификационный тикет для проверки функции правки плана через Telegram (Approval Gate с кнопками ✅/✏️/❌). Проверен CI workflow: Approval Gate корректно реализован (request-approval → polling → approved/rejected/revision, макс 3 ревизии). Запущены все тесты — smoke 14/14, performance 16/16. Все performance-бюджеты в норме.
+
+### Результаты тестов
+- **Smoke tests:** 14/14 passed (chrome + mobile) за 10.2s
+- **Performance tests:** 16/16 passed (chrome + mobile) за 31.1s
+- DOMContentLoaded: 625-651ms (бюджет < 2000ms)
+- Page weight: 168 KB (бюджет < 500 KB)
+- JS heap: 9.5 MB (бюджет < 30 MB)
+- CLS: 0.0000 (бюджет < 0.1)
+- FPS: 58.6-60.1 (бюджет > 30)
+- Memory leak: 0.00 MB за 10s (бюджет < 5 MB)
+- Input response: 40-47ms (бюджет < 500ms)
+
+### Проверка Approval Gate workflow
+- CI: ci:approve label → request-approval → polling 30s/15min → approved/rejected/revision
+- Revision loop: Claude пересоздаёт план с фидбеком разработчика (макс 3 ревизии)
+- notify.sh: корректно отправляет план и codex_review в Telegram
+
+### Изменённые файлы
+- `DEVLOG.md` — добавлена запись о верификации workflow
+
+### Как перенести в main
+```bash
+git cherry-pick fb9030e3d1368144fa30596c0a9c978e0ef418e8
+```
+
+---
+
 ## #126 — Вверху игры есть две кнопки
 **Дата:** 2026-02-18
 **Ветка:** dev/Gleb
