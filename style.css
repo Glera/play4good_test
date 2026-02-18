@@ -384,6 +384,9 @@ body {
     text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     margin-bottom: 16px;
     letter-spacing: 3px;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    max-width: 100%;
 }
 
 #overlay-message {
@@ -442,6 +445,11 @@ body {
     .footer-btn-circle svg {
         width: 22px;
         height: 22px;
+    }
+
+    #overlay-title {
+        font-size: 24px;
+        letter-spacing: 1px;
     }
 }
 
