@@ -2,6 +2,36 @@
 
 История изменений для cherry-pick в main.
 
+## #117 — верификация Playwright тестов и Telegram уведомлений нового workflow
+**Дата:** 2026-02-18
+**Ветка:** dev/Gleb
+**Коммит:** `51cb3c2`
+**Статус:** ✅ готово к переносу
+
+### Что сделано
+Верификационный тикет для проверки работоспособности нового CI workflow. Установлены зависимости (npm ci, playwright install chromium + deps). Запущены все smoke-тесты (14/14 passed) и performance-тесты (16/16 passed). Telegram-уведомления доставлены через notify.sh. Никаких изменений в коде приложения — только запись в DEVLOG.
+
+### Результаты тестов
+- **Smoke tests:** 14/14 passed (chrome + mobile) за 10.8s
+- **Performance tests:** 16/16 passed (chrome + mobile) за 31.2s
+- DOMContentLoaded: 592ms (бюджет < 2000ms)
+- Page weight: 166 KB (бюджет < 500 KB)
+- JS heap: 9.5 MB (бюджет < 30 MB)
+- CLS: 0.0000 (бюджет < 0.1)
+- FPS: 60.5 (бюджет > 30)
+- Memory leak: 0.00 MB за 10s (бюджет < 5 MB)
+- Input response: 41ms (бюджет < 500ms)
+
+### Изменённые файлы
+- `DEVLOG.md` — добавлена запись о верификации
+
+### Как перенести в main
+```bash
+git cherry-pick 51cb3c2456b9faef03415ff92dcd053c2fff7816
+```
+
+---
+
 ## #116 — тестовый тикет проверить работу нового воркфлоу
 **Дата:** 2026-02-17
 **Ветка:** dev/Gleb
