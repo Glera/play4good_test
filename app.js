@@ -636,8 +636,9 @@ function createParticles(x, y) {
     }
 }
 
-// Animate a tile along a quadratic bezier arc using CSS transforms (GPU-accelerated)
-function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDone) {
+// Animate a tile along a cubic bezier arc using CSS transforms (GPU-accelerated)
+// P0=start, P1=ctrl1, P2=ctrl2, P3=end — two control points for spread-then-collide effect
+function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY, duration, onDone) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
     el.style.zIndex = 10000;
@@ -646,10 +647,14 @@ function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDo
 
     function step(now) {
         const t = Math.min((now - startTime) / duration, 1);
-        // Quadratic bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+        // Cubic bezier: B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
         const inv = 1 - t;
-        const x = inv * inv * startX + 2 * inv * t * ctrlX + t * t * endX;
-        const y = inv * inv * startY + 2 * inv * t * ctrlY + t * t * endY;
+        const inv2 = inv * inv;
+        const inv3 = inv2 * inv;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const x = inv3 * startX + 3 * inv2 * t * ctrl1X + 3 * inv * t2 * ctrl2X + t3 * endX;
+        const y = inv3 * startY + 3 * inv2 * t * ctrl1Y + 3 * inv * t2 * ctrl2Y + t3 * endY;
         // Use translate3d for GPU compositing instead of left/top
         const dx = x - startX;
         const dy = y - startY;
@@ -717,37 +722,46 @@ function removePair(a, b) {
     const endBx = meetX - tileW / 2;
     const endBy = meetY - tileH / 2;
 
-    // Arc trajectory: tiles should NOT fly over each other.
-    // Determine how "vertical" the arrangement is to decide arc direction.
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
+    // Arc trajectory using cubic Bezier: tiles first spread apart, then collide.
+    // Two control points per tile create a spread-then-converge path.
 
-    // Perpendicular to the line connecting A→B (used for arc curvature)
-    const nx = dx / (dist || 1);
-    const ny = dy / (dist || 1);
-    const px = -ny; // perpendicular X
-    const py = nx;  // perpendicular Y
-
-    let arcHeight = Math.max(20, dist * 0.25);
-
-    // If tiles are mostly vertical (one above the other), they need to arc
-    // sideways so they don't fly through each other. We increase the arc
-    // and ensure the perpendicular direction pushes them apart horizontally.
-    if (absDy > absDx * 1.2) {
-        // Vertical arrangement — increase arc so tiles swing wide to the sides
-        arcHeight = Math.max(40, dist * 0.4);
+    // Direction vector from A to B (normalized), with fallback for dist≈0
+    let nx, ny;
+    if (dist < 1) {
+        // Tiles nearly overlapping — use arbitrary perpendicular direction
+        nx = 1;
+        ny = 0;
+    } else {
+        nx = dx / dist;
+        ny = dy / dist;
     }
+    // Perpendicular to the line connecting A→B
+    const px = -ny;
+    const py = nx;
 
-    // Choose arc direction: tile A arcs one way, tile B arcs the opposite way.
-    // This ensures they fly around each other, not through each other.
-    // For tile A: control point is offset perpendicular from A→meetingPoint midpoint
-    // For tile B: control point is offset opposite perpendicular from B→meetingPoint midpoint
-    const arcMidAx = (ax + endAx) / 2 + px * arcHeight;
-    const arcMidAy = (ay + endAy) / 2 + py * arcHeight;
-    const arcMidBx = (bx + endBx) / 2 - px * arcHeight;
-    const arcMidBy = (by + endBy) / 2 - py * arcHeight;
+    // Spread distance: how far tiles fly apart before converging.
+    // Clamped to avoid flying off-screen on mobile (max 120px).
+    const spread = Math.min(120, Math.max(40, dist * 0.45));
 
-    const duration = 400;
+    // Approach distance: how far the "run-up" to the meeting point is.
+    // This pulls control point 2 back from meetPoint along the arrival direction.
+    const approach = Math.min(80, Math.max(20, dist * 0.3));
+
+    // Control point 1: pull tile AWAY from partner (spread phase).
+    // Tile A spreads in +perpendicular direction, tile B in -perpendicular.
+    const ctrl1Ax = ax + px * spread;
+    const ctrl1Ay = ay + py * spread;
+    const ctrl1Bx = bx - px * spread;
+    const ctrl1By = by - py * spread;
+
+    // Control point 2: approach meetPoint from opposite sides (converge phase).
+    // Tile A approaches from one side, tile B from the other.
+    const ctrl2Ax = endAx - px * approach;
+    const ctrl2Ay = endAy - py * approach;
+    const ctrl2Bx = endBx + px * approach;
+    const ctrl2By = endBy + py * approach;
+
+    const duration = 500;
     let finished = 0;
 
     function onFinish() {
@@ -771,8 +785,8 @@ function removePair(a, b) {
     updateTileStates();
     updateUI();
 
-    animateArc(elA, ax, ay, arcMidAx, arcMidAy, endAx, endAy, duration, onFinish);
-    animateArc(elB, bx, by, arcMidBx, arcMidBy, endBx, endBy, duration, onFinish);
+    animateArc(elA, ax, ay, ctrl1Ax, ctrl1Ay, ctrl2Ax, ctrl2Ay, endAx, endAy, duration, onFinish);
+    animateArc(elB, bx, by, ctrl1Bx, ctrl1By, ctrl2Bx, ctrl2By, endBx, endBy, duration, onFinish);
 }
 
 // Update UI counters
