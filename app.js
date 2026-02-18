@@ -636,28 +636,24 @@ function createParticles(x, y) {
     }
 }
 
-// Animate a tile along a cubic bezier arc using CSS transforms (GPU-accelerated)
-// P0=start, P1=ctrl1, P2=ctrl2, P3=end — two control points for spread-then-collide effect
-function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY, duration, onDone) {
+// Animate a tile along a quadratic Bezier arc using CSS transforms (GPU-accelerated)
+// P0=start, P1=ctrl, P2=end — single control point for one smooth arc without inflections
+function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDone) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
     el.style.zIndex = 10000;
-    // Use transform instead of left/top for GPU-accelerated animation
     el.style.willChange = 'transform';
 
     function step(now) {
         const tLinear = Math.min((now - startTime) / duration, 1);
         // Ease-out: tiles decelerate as they approach the meeting point
         const t = 1 - (1 - tLinear) * (1 - tLinear);
-        // Cubic bezier: B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
+        // Quadratic Bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
         const inv = 1 - t;
         const inv2 = inv * inv;
-        const inv3 = inv2 * inv;
         const t2 = t * t;
-        const t3 = t2 * t;
-        const x = inv3 * startX + 3 * inv2 * t * ctrl1X + 3 * inv * t2 * ctrl2X + t3 * endX;
-        const y = inv3 * startY + 3 * inv2 * t * ctrl1Y + 3 * inv * t2 * ctrl2Y + t3 * endY;
-        // Use translate3d for GPU compositing instead of left/top
+        const x = inv2 * startX + 2 * inv * t * ctrlX + t2 * endX;
+        const y = inv2 * startY + 2 * inv * t * ctrlY + t2 * endY;
         const dx = x - startX;
         const dy = y - startY;
         el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
@@ -735,38 +731,42 @@ function removePair(a, b) {
     const endBx = meetX + nx * tileW / 2 - tileW / 2;
     const endBy = meetY + ny * tileW / 2 - tileH / 2;
 
-    // Arc trajectory using cubic Bezier: tiles spread apart in a wide arc,
-    // then converge along the collision axis.
-
-    // Perpendicular to the line connecting A→B
-    const px = -ny;
-    const py = nx;
+    // Arc trajectory using quadratic Bezier: single control point per tile
+    // gives one smooth arc without inflection points (no jerky S-curve).
 
     // Board dimensions for bounds clamping
     const boardW = parseFloat(boardEl.style.width) || 1;
     const boardH = parseFloat(boardEl.style.height) || 1;
 
-    // Scale spread relative to tile size — wider arc for more dramatic trajectory
-    const tileRef = (tileW + tileH) / 2;
-    const spread = Math.min(tileRef * 4, Math.max(tileRef * 1.5, dist * 0.6));
+    // Vertical and horizontal distances between tile centers
+    const absDy = Math.abs(dy);
+    const absDx = Math.abs(dx);
 
-    // Control point 1: pull tile AWAY from partner (spread phase).
-    // Also push backward (away from partner along nx/ny) for a rounder initial arc.
-    const pushBack = tileRef * 0.5;
-    let ctrl1Ax = ax + px * spread - nx * pushBack;
-    let ctrl1Ay = ay + py * spread - ny * pushBack;
-    let ctrl1Bx = bx - px * spread + nx * pushBack;
-    let ctrl1By = by - py * spread + ny * pushBack;
+    // Peak height: 1/4 of vertical distance above the higher tile, with min fallback
+    const minLift = tileH;
+    const peakY = Math.min(aCy, bCy) - Math.max(absDy / 4, minLift);
 
-    // Control point 2: ensure approach along the collision axis (A→B direction).
-    // Place ctrl2 on the same plane as the endpoint, offset outward along -nx/+nx.
-    const approachDist = Math.max(tileRef * 2, dist * 0.5);
-    let ctrl2Ax = endAx - nx * approachDist;
-    let ctrl2Ay = endAy - ny * approachDist;
-    let ctrl2Bx = endBx + nx * approachDist;
-    let ctrl2By = endBy + ny * approachDist;
+    // Horizontal offset: 2× horizontal distance, clamped to [5*tileW, boardW]
+    const minHOffset = tileW * 5;
+    const maxHOffset = boardW;
+    const hOffset = Math.max(minHOffset, Math.min(absDx * 2, maxHOffset));
 
-    // Clamp all control points to board bounds so arcs don't fly outside the field
+    // Both tiles arc to the same side (toward the midpoint but offset).
+    // Choose direction: arc goes to the side with more space from the board edge.
+    const spaceLeft = meetX;
+    const spaceRight = boardW - meetX;
+    const arcSign = spaceRight >= spaceLeft ? 1 : -1;
+
+    // Single control point for each tile: shared peak position
+    // Both tiles curve through the same apex for a cohesive visual
+    const peakX = meetX + arcSign * hOffset / 2;
+
+    let ctrlAx = peakX - tileW / 2;
+    let ctrlAy = peakY - tileH / 2;
+    let ctrlBx = peakX - tileW / 2;
+    let ctrlBy = peakY - tileH / 2;
+
+    // Clamp control points to board bounds so arcs stay visible
     const pad = tileW * 0.5;
     function clampToBounds(cx, cy) {
         return [
@@ -774,10 +774,8 @@ function removePair(a, b) {
             Math.max(-pad, Math.min(boardH + pad, cy))
         ];
     }
-    [ctrl1Ax, ctrl1Ay] = clampToBounds(ctrl1Ax, ctrl1Ay);
-    [ctrl1Bx, ctrl1By] = clampToBounds(ctrl1Bx, ctrl1By);
-    [ctrl2Ax, ctrl2Ay] = clampToBounds(ctrl2Ax, ctrl2Ay);
-    [ctrl2Bx, ctrl2By] = clampToBounds(ctrl2Bx, ctrl2By);
+    [ctrlAx, ctrlAy] = clampToBounds(ctrlAx, ctrlAy);
+    [ctrlBx, ctrlBy] = clampToBounds(ctrlBx, ctrlBy);
 
     // Duration scales with distance: wider arcs need more time.
     // Clamped to [300, 500] — must stay ≤ 0.5s to sync with particle-burst
@@ -806,8 +804,8 @@ function removePair(a, b) {
     updateTileStates();
     updateUI();
 
-    animateArc(elA, ax, ay, ctrl1Ax, ctrl1Ay, ctrl2Ax, ctrl2Ay, endAx, endAy, duration, onFinish);
-    animateArc(elB, bx, by, ctrl1Bx, ctrl1By, ctrl2Bx, ctrl2By, endBx, endBy, duration, onFinish);
+    animateArc(elA, ax, ay, ctrlAx, ctrlAy, endAx, endAy, duration, onFinish);
+    animateArc(elB, bx, by, ctrlBx, ctrlBy, endBx, endBy, duration, onFinish);
 }
 
 // Update UI counters
