@@ -747,18 +747,29 @@ function removePair(a, b) {
 }
 
 // Update UI counters
+// Pairs count is cached and updated via a debounced rAF to avoid expensive
+// findAvailableMatches() computation on every updateUI() call
+let pairsRafId = null;
+
 function updateUI() {
     const remaining = tiles.filter(t => !t.removed).length;
     tilesLeftEl.textContent = remaining;
     movesEl.textContent = moves;
     scoreEl.textContent = score;
 
-    // Show available pairs count (graceful fallback if element or function unavailable)
-    if (pairsAvailableEl && remaining > 0) {
-        const matches = findAvailableMatches();
-        pairsAvailableEl.textContent = matches ? matches.length : 0;
-    } else if (pairsAvailableEl) {
-        pairsAvailableEl.textContent = 0;
+    // Schedule debounced pairs count update (expensive O(n²) operation)
+    if (pairsAvailableEl) {
+        if (remaining > 0 && gameRunning && typeof findAvailableMatches === 'function') {
+            if (!pairsRafId) {
+                pairsRafId = requestAnimationFrame(() => {
+                    pairsRafId = null;
+                    const matches = findAvailableMatches();
+                    pairsAvailableEl.textContent = matches ? matches.length : 0;
+                });
+            }
+        } else {
+            pairsAvailableEl.textContent = 0;
+        }
     }
 }
 
