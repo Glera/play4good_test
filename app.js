@@ -671,6 +671,68 @@ function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, en
     requestAnimationFrame(step);
 }
 
+// Calculate normalized direction and perpendicular vectors from A→B.
+// Returns fallback values when tiles have coincident centers (dist ≈ 0)
+// to prevent NaN in downstream normal/perpendicular calculations.
+function calcDirection(dx, dy, dist) {
+    if (dist < 1) {
+        return { nx: 1, ny: 0, perpX: 0, perpY: 1 };
+    }
+    const nx = dx / dist;
+    const ny = dy / dist;
+    return { nx, ny, perpX: -ny, perpY: nx };
+}
+
+// Compute a scatter control point (ctrl1): tile flies AWAY from partner
+// sign: +1 for tile A, -1 for tile B (opposite perpendicular directions)
+function calcScatterCtrl(cx, cy, meetY, perpX, perpY, scatterDist, sign, tileW, tileH) {
+    const x = cx + sign * perpX * scatterDist - tileW / 2;
+    const y = cy + sign * perpY * scatterDist + (meetY - cy) * 0.25 - tileH / 2;
+    return [x, y];
+}
+
+// Compute a converge control point (ctrl2): tile curves toward meeting point
+// sign: +1 for tile A, -1 for tile B
+function calcConvergeCtrl(meetX, meetY, perpX, perpY, sign, tileW, tileH) {
+    const x = meetX + sign * perpX * tileW * 0.3 - tileW / 2;
+    const y = meetY + sign * perpY * tileW * 0.3 - tileH / 2;
+    return [x, y];
+}
+
+// Clamp a pair of control points to board bounds, preserving visual symmetry.
+// Each control point is clamped relative to its own reference point (refX/refY)
+// — for scatter ctrl1 this is the tile's start, for converge ctrl2 the meeting point.
+// If one is clamped more, the other's offset is scaled to match.
+function clampCtrlPairSymmetric(x1, y1, ref1X, ref1Y, x2, y2, ref2X, ref2Y, boardW, boardH, pad) {
+    let cx1 = Math.max(-pad, Math.min(boardW + pad, x1));
+    let cy1 = Math.max(-pad, Math.min(boardH + pad, y1));
+    let cx2 = Math.max(-pad, Math.min(boardW + pad, x2));
+    let cy2 = Math.max(-pad, Math.min(boardH + pad, y2));
+
+    const shrink1 = Math.sqrt((cx1 - x1) ** 2 + (cy1 - y1) ** 2);
+    const shrink2 = Math.sqrt((cx2 - x2) ** 2 + (cy2 - y2) ** 2);
+
+    if (shrink1 > 0 && shrink1 > shrink2) {
+        const origDist1 = Math.sqrt((x1 - ref1X) ** 2 + (y1 - ref1Y) ** 2);
+        if (origDist1 > 0) {
+            const clampDist1 = Math.sqrt((cx1 - ref1X) ** 2 + (cy1 - ref1Y) ** 2);
+            const ratio = clampDist1 / origDist1;
+            cx2 = ref2X + (x2 - ref2X) * ratio;
+            cy2 = ref2Y + (y2 - ref2Y) * ratio;
+        }
+    } else if (shrink2 > 0 && shrink2 > shrink1) {
+        const origDist2 = Math.sqrt((x2 - ref2X) ** 2 + (y2 - ref2Y) ** 2);
+        if (origDist2 > 0) {
+            const clampDist2 = Math.sqrt((cx2 - ref2X) ** 2 + (cy2 - ref2Y) ** 2);
+            const ratio = clampDist2 / origDist2;
+            cx1 = ref1X + (x1 - ref1X) * ratio;
+            cy1 = ref1Y + (y1 - ref1Y) * ratio;
+        }
+    }
+
+    return [cx1, cy1, cx2, cy2];
+}
+
 // Remove a matched pair with fly-together arc animation
 function removePair(a, b) {
     a.removed = true;
@@ -717,107 +779,45 @@ function removePair(a, b) {
     const meetX = (aCx + bCx) / 2;
     const meetY = (aCy + bCy) / 2;
 
-    // Direction vector from A to B (normalized), with fallback for dist≈0.
-    // Always normalize by actual dist to preserve unit-length direction;
-    // using a larger safeDist would shrink nx/ny and cause tiles to overlap.
-    let nx, ny;
-    if (dist < 1) {
-        nx = 1;
-        ny = 0;
-    } else {
-        nx = dx / dist;
-        ny = dy / dist;
-    }
+    // Direction & perpendicular vectors (with explicit guard for coincident tiles)
+    const { nx, ny, perpX, perpY } = calcDirection(dx, dy, dist);
 
-    // Perpendicular to A→B direction: used to spread tiles apart
-    const perpX = -ny;
-    const perpY = nx;
-
-    // Tiles meet side-by-side along the collision axis.
-    // Offset each tile half a tile-width backward along the A→B direction
-    // so they touch at meetX/meetY without overlapping or crossing.
+    // End positions: tiles meet side-by-side along the A→B axis
     const endAx = meetX - nx * tileW / 2 - tileW / 2;
     const endAy = meetY - ny * tileW / 2 - tileH / 2;
     const endBx = meetX + nx * tileW / 2 - tileW / 2;
     const endBy = meetY + ny * tileW / 2 - tileH / 2;
 
-    // Arc trajectory using cubic Bezier with two control points per tile:
-    // ctrl1 = "scatter" — tile flies AWAY from partner (outward)
-    // ctrl2 = "converge" — tile curves back toward the meeting point
-    // This creates the effect: tiles scatter apart, then come together.
-
-    // Board layout dimensions (pre-transform). Prefer inline style set by renderBoard;
-    // fall back to offsetWidth/offsetHeight which also ignore CSS transforms.
+    // Board layout dimensions (pre-transform)
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Scatter distance: how far each tile flies outward from its start position.
-    // Symmetric for both tiles to ensure equal horizontal path length.
-    // Minimum ensures visible scatter even for adjacent tiles.
-    const safeDist = Math.max(dist, tileW); // avoid zero/tiny dist issues
+    // Scatter distance: how far each tile flies outward from start
+    const safeDist = Math.max(dist, tileW);
     const scatterDist = Math.max(tileW * 1.5, safeDist * 0.4);
 
-    // Determine scatter direction: perpendicular to A→B line.
-    // For nearly vertical pairs (dx ≈ 0), perpendicular is horizontal (good scatter).
-    // For nearly horizontal pairs (dy ≈ 0), perpendicular is vertical — also correct,
-    // tiles scatter up/down then converge horizontally.
-    // perpX/perpY already handles this correctly as it's orthogonal to (nx,ny).
+    // Build control points: scatter (ctrl1) then converge (ctrl2)
+    let ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By;
+    let ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By;
+    [ctrl1Ax, ctrl1Ay] = calcScatterCtrl(aCx, aCy, meetY, perpX, perpY, scatterDist, +1, tileW, tileH);
+    [ctrl1Bx, ctrl1By] = calcScatterCtrl(bCx, bCy, meetY, perpX, perpY, scatterDist, -1, tileW, tileH);
+    [ctrl2Ax, ctrl2Ay] = calcConvergeCtrl(meetX, meetY, perpX, perpY, +1, tileW, tileH);
+    [ctrl2Bx, ctrl2By] = calcConvergeCtrl(meetX, meetY, perpX, perpY, -1, tileW, tileH);
 
-    // ctrl1 (scatter phase, ~25% of path): tile moves AWAY from partner
-    // Tile A scatters in +perp direction, tile B in -perp direction
-    let ctrl1Ax = aCx + perpX * scatterDist - tileW / 2;
-    let ctrl1Ay = aCy + perpY * scatterDist + (meetY - aCy) * 0.25 - tileH / 2;
-    let ctrl1Bx = bCx - perpX * scatterDist - tileW / 2;
-    let ctrl1By = bCy - perpY * scatterDist + (meetY - bCy) * 0.25 - tileH / 2;
-
-    // ctrl2 (converge phase, ~75% of path): tile curves toward meeting point
-    let ctrl2Ax = meetX + perpX * tileW * 0.3 - tileW / 2;
-    let ctrl2Ay = meetY + perpY * tileW * 0.3 - tileH / 2;
-    let ctrl2Bx = meetX - perpX * tileW * 0.3 - tileW / 2;
-    let ctrl2By = meetY - perpY * tileW * 0.3 - tileH / 2;
-
-    // Clamp all control points to board bounds so arcs stay visible.
-    // When clamping reduces one tile's scatter distance, reduce the other's equally
-    // to preserve visual symmetry.
+    // Clamp control points to board bounds, preserving symmetry
     const pad = tileW * 0.5;
-    function clampCtrlPair(x1, y1, x2, y2) {
-        // Clamp each independently first
-        let cx1 = Math.max(-pad, Math.min(boardW + pad, x1));
-        let cy1 = Math.max(-pad, Math.min(boardH + pad, y1));
-        let cx2 = Math.max(-pad, Math.min(boardW + pad, x2));
-        let cy2 = Math.max(-pad, Math.min(boardH + pad, y2));
-        // Symmetric correction: if one was reduced more, shrink the other to match.
-        // Compare the magnitude of displacement from original to clamped.
-        const shrink1 = Math.sqrt((cx1 - x1) ** 2 + (cy1 - y1) ** 2);
-        const shrink2 = Math.sqrt((cx2 - x2) ** 2 + (cy2 - y2) ** 2);
-        if (shrink1 > 0 && shrink1 > shrink2) {
-            // Tile 1 was clamped more — scale tile 2's offset by the same ratio
-            const origDist2 = Math.sqrt((x2 - meetX) ** 2 + (y2 - meetY) ** 2);
-            const clampDist1 = Math.sqrt((cx1 - meetX) ** 2 + (cy1 - meetY) ** 2);
-            const origDist1 = Math.sqrt((x1 - meetX) ** 2 + (y1 - meetY) ** 2);
-            if (origDist1 > 0) {
-                const ratio = clampDist1 / origDist1;
-                cx2 = meetX + (x2 - meetX) * ratio;
-                cy2 = meetY + (y2 - meetY) * ratio;
-            }
-        } else if (shrink2 > 0 && shrink2 > shrink1) {
-            const origDist1 = Math.sqrt((x1 - meetX) ** 2 + (y1 - meetY) ** 2);
-            const clampDist2 = Math.sqrt((cx2 - meetX) ** 2 + (cy2 - meetY) ** 2);
-            const origDist2 = Math.sqrt((x2 - meetX) ** 2 + (y2 - meetY) ** 2);
-            if (origDist2 > 0) {
-                const ratio = clampDist2 / origDist2;
-                cx1 = meetX + (x1 - meetX) * ratio;
-                cy1 = meetY + (y1 - meetY) * ratio;
-            }
-        }
-        return [cx1, cy1, cx2, cy2];
-    }
+    [ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By] = clampCtrlPairSymmetric(
+        ctrl1Ax, ctrl1Ay, aCx - tileW / 2, aCy - tileH / 2,
+        ctrl1Bx, ctrl1By, bCx - tileW / 2, bCy - tileH / 2,
+        boardW, boardH, pad
+    );
+    [ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By] = clampCtrlPairSymmetric(
+        ctrl2Ax, ctrl2Ay, meetX - tileW / 2, meetY - tileH / 2,
+        ctrl2Bx, ctrl2By, meetX - tileW / 2, meetY - tileH / 2,
+        boardW, boardH, pad
+    );
 
-    [ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By] = clampCtrlPair(ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By);
-    [ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By] = clampCtrlPair(ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By);
-
-    // Duration scales with distance: wider arcs need more time.
-    // Capped at 500ms to stay in sync with particle-burst CSS animation (0.5s).
+    // Duration scales with distance, capped at 500ms (particle-burst sync)
     const duration = Math.round(Math.min(500, Math.max(350, 300 + dist * 0.4)));
     let finished = 0;
 
