@@ -685,9 +685,11 @@ function calcDirection(dx, dy, dist) {
 
 // Compute a scatter control point (ctrl1): tile flies AWAY from partner
 // sign: +1 for tile A, -1 for tile B (opposite perpendicular directions)
+// Scale scatter by tileH/tileW ratio on Y-axis to avoid overlap with non-square tiles
 function calcScatterCtrl(cx, cy, meetY, perpX, perpY, scatterDist, sign, tileW, tileH) {
+    const yScale = tileH / tileW;
     const x = cx + sign * perpX * scatterDist - tileW / 2;
-    const y = cy + sign * perpY * scatterDist + (meetY - cy) * 0.1 - tileH / 2;
+    const y = cy + sign * perpY * scatterDist * yScale + (meetY - cy) * 0.1 - tileH / 2;
     return [x, y];
 }
 
@@ -695,7 +697,7 @@ function calcScatterCtrl(cx, cy, meetY, perpX, perpY, scatterDist, sign, tileW, 
 // sign: +1 for tile A, -1 for tile B
 function calcConvergeCtrl(meetX, meetY, perpX, perpY, sign, tileW, tileH) {
     const x = meetX + sign * perpX * tileW * 0.15 - tileW / 2;
-    const y = meetY + sign * perpY * tileW * 0.15 - tileH / 2;
+    const y = meetY + sign * perpY * tileH * 0.15 - tileH / 2;
     return [x, y];
 }
 
@@ -783,11 +785,13 @@ function removePair(a, b) {
     const { nx, ny, perpX, perpY } = calcDirection(dx, dy, dist);
 
     // End positions: tiles meet nearly touching along the A→B axis
-    const endGap = tileW * 0.1;
-    const endAx = meetX - nx * endGap - tileW / 2;
-    const endAy = meetY - ny * endGap - tileH / 2;
-    const endBx = meetX + nx * endGap - tileW / 2;
-    const endBy = meetY + ny * endGap - tileH / 2;
+    // Use tileW for X-component and tileH for Y-component to avoid overlap with non-square tiles
+    const endGapX = tileW * 0.1;
+    const endGapY = tileH * 0.1;
+    const endAx = meetX - nx * endGapX - tileW / 2;
+    const endAy = meetY - ny * endGapY - tileH / 2;
+    const endBx = meetX + nx * endGapX - tileW / 2;
+    const endBy = meetY + ny * endGapY - tileH / 2;
 
     // Board layout dimensions (pre-transform)
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
@@ -806,8 +810,9 @@ function removePair(a, b) {
     [ctrl2Bx, ctrl2By] = calcConvergeCtrl(meetX, meetY, perpX, perpY, -1, tileW, tileH);
 
     // Clamp control points to board bounds, preserving symmetry
-    // Extra padding allows scatter points to extend slightly beyond board edges
-    const pad = tileW * 1.5;
+    // Small padding allows scatter points to extend slightly beyond board edges
+    // but not far enough to cause viewport scrolling on mobile
+    const pad = tileW * 0.5;
     [ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By] = clampCtrlPairSymmetric(
         ctrl1Ax, ctrl1Ay, aCx - tileW / 2, aCy - tileH / 2,
         ctrl1Bx, ctrl1By, bCx - tileW / 2, bCy - tileH / 2,
@@ -819,8 +824,8 @@ function removePair(a, b) {
         boardW, boardH, pad
     );
 
-    // Duration scales with distance for smooth arc animation
-    const duration = Math.round(Math.min(800, Math.max(550, 450 + dist * 0.6)));
+    // Duration scales with distance for smooth arc animation (capped at 500ms to stay in sync with particles)
+    const duration = Math.round(Math.min(500, Math.max(350, 300 + dist * 0.4)));
     let finished = 0;
 
     function onFinish() {
@@ -830,13 +835,10 @@ function removePair(a, b) {
             // Fade out tiles before removing from DOM
             if (elA) elA.classList.add('tile-fade-out');
             if (elB) elB.classList.add('tile-fade-out');
-            const fadeTimer = setTimeout(() => {
+            setTimeout(() => {
                 if (elA && elA.parentNode) elA.remove();
                 if (elB && elB.parentNode) elB.remove();
             }, 150);
-            // Store timer on elements for cleanup if needed
-            if (elA) elA._fadeTimer = fadeTimer;
-            if (elB) elB._fadeTimer = fadeTimer;
             applyZoom();
             checkGameState();
         }

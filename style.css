@@ -166,8 +166,8 @@ body {
 }
 
 /* Fly-together match animation (handled by JS for arc trajectory) */
-/* Fade-out after tiles meet — applied by JS before DOM removal */
-.mahjong-tile.tile-fade-out .tile-face {
+/* Fade-out after tiles meet — applied to the entire tile (including shadow/border) before DOM removal */
+.mahjong-tile.tile-fade-out {
     transition: opacity 0.15s ease-out;
     opacity: 0;
 }
