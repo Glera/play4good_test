@@ -134,7 +134,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
@@ -199,7 +199,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           if [ ! -f /tmp/plan.md ]; then
             echo "No plan to review — skipping"
@@ -235,7 +235,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
@@ -302,7 +302,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           echo "=== Phase 3: Continuing implementation (+30 turns) ==="
           claude -p --dangerously-skip-permissions \
@@ -322,7 +322,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
           if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
@@ -363,7 +363,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           BRANCH=$(git branch --show-current)
           ISSUE_NUM="${{ github.event.issue.number }}"
@@ -406,7 +406,7 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
           if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
@@ -435,7 +435,7 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           CURRENT_SHA=$(git rev-parse HEAD)
           if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
@@ -467,7 +467,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           BRANCH=$(git branch --show-current)
           ISSUE_NUM="${{ github.event.issue.number }}"
@@ -510,7 +510,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           BRANCH=$(git branch --show-current)
           ISSUE_NUM="${{ github.event.issue.number }}"
@@ -595,7 +595,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
@@ -641,7 +641,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           claude -p --dangerously-skip-permissions \
             --model claude-sonnet-4-5-20250929 \
@@ -749,7 +749,7 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
-          GITHUB_HEAD_REF: ${{ steps.dev.outputs.branch }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
           # Report test results in notification
           TEST_STATUS=""

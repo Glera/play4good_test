@@ -4,7 +4,7 @@
 # Types: plan, progress, question, done, error, info
 
 BOT_URL="${BOT_NOTIFY_URL:-https://play4good-bot.onrender.com}"
-BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+BRANCH="${DEV_BRANCH:-${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}}"
 ISSUE_NUMBER="${ISSUE_NUMBER:-0}"
 
 TYPE="${1:-info}"
