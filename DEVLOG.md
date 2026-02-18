@@ -2,6 +2,28 @@
 
 История изменений для cherry-pick в main.
 
+## #131 — Убрать информацию вверху (очки, уровень, совпадения)
+**Дата:** 2026-02-18
+**Ветка:** dev/Gleb
+**Коммит:** `281ac6c`
+**Статус:** ✅ готово к переносу
+
+### Что сделано
+Удалён блок `.game-header` с информацией о Level, Score и Matches из верхней части экрана. Убраны HTML-элементы, CSS-стили (включая responsive правила), DOM-ссылки и обновления в JS. Переменные `score` и `moves` сохранены — они используются в игровой логике и overlay при победе.
+
+### Изменённые файлы
+- `index.html` — удалён блок `<div class="game-header">` с Level/Score/Matches
+- `style.css` — удалены правила для `.game-header`, `.header-stats`, `.stat-item`, `.stat-label`, `.stat-value` и их responsive варианты
+- `app.js` — удалены DOM-ссылки `movesEl`, `scoreEl` и их обновления в `updateUI()`
+- `tests/e2e/smoke.spec.ts` — обновлён тест `game info displays initial values`, убраны проверки `#score`, `#level-value`, `#moves`
+
+### Как перенести в main
+```bash
+git cherry-pick 281ac6cc1c762ccf0e29af0d72c28423ef1cdec7
+```
+
+---
+
 ## #130 — еще один тест быстрого флоу
 **Дата:** 2026-02-18
 **Ветка:** dev/Gleb

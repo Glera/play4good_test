@@ -37,40 +37,6 @@ body {
     contain: layout style;
 }
 
-/* ─── Header ─── */
-.game-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 12px;
-    flex-shrink: 0;
-}
-
-.header-stats {
-    display: flex;
-    gap: 24px;
-    justify-content: center;
-}
-
-.stat-item {
-    text-align: center;
-}
-
-.stat-label {
-    display: block;
-    font-size: 13px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.75);
-    letter-spacing: 0.5px;
-}
-
-.stat-value {
-    display: block;
-    font-size: 20px;
-    font-weight: 700;
-    color: #fff;
-}
-
 /* ─── Game Board Area ─── */
 .game-board-area {
     flex: 1;
@@ -406,18 +372,6 @@ body {
 
 /* ─── Responsive ─── */
 @media (max-width: 380px) {
-    .header-stats {
-        gap: 14px;
-    }
-
-    .stat-label {
-        font-size: 11px;
-    }
-
-    .stat-value {
-        font-size: 17px;
-    }
-
     .game-footer {
         gap: 30px;
         padding: 8px 16px 12px;
@@ -440,18 +394,6 @@ body {
 }
 
 @media (max-height: 650px) {
-    .game-header {
-        padding: 4px 10px;
-    }
-
-    .stat-label {
-        font-size: 11px;
-    }
-
-    .stat-value {
-        font-size: 16px;
-    }
-
     .tiles-counter {
         padding: 2px 0;
         font-size: 11px;

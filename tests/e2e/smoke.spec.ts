@@ -41,9 +41,6 @@ test.describe('P4G Mahjong — Smoke Tests', () => {
   });
 
   test('game info displays initial values', async ({ page }) => {
-    await expect(page.locator('#score')).toHaveText('0');
-    await expect(page.locator('#level-value')).toHaveText('1');
-    await expect(page.locator('#moves')).toHaveText('0');
     await expect(page.locator('#tiles-left')).toHaveText('144');
   });
 
