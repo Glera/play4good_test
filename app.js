@@ -636,9 +636,9 @@ function createParticles(x, y) {
     }
 }
 
-// Animate a tile along a quadratic Bezier arc using CSS transforms (GPU-accelerated)
-// P0=start, P1=ctrl, P2=end — single control point for one smooth arc without inflections
-function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDone) {
+// Animate a tile along a cubic Bezier arc using CSS transforms (GPU-accelerated)
+// P0=start, P1=ctrl1 (scatter), P2=ctrl2 (converge), P3=end
+function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY, duration, onDone) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
     el.style.zIndex = 10000;
@@ -650,12 +650,14 @@ function animateArc(el, startX, startY, ctrlX, ctrlY, endX, endY, duration, onDo
         const t = tLinear < 0.5
             ? 2 * tLinear * tLinear
             : 1 - 2 * (1 - tLinear) * (1 - tLinear);
-        // Quadratic Bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+        // Cubic Bezier: B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
         const inv = 1 - t;
         const inv2 = inv * inv;
+        const inv3 = inv2 * inv;
         const t2 = t * t;
-        const x = inv2 * startX + 2 * inv * t * ctrlX + t2 * endX;
-        const y = inv2 * startY + 2 * inv * t * ctrlY + t2 * endY;
+        const t3 = t2 * t;
+        const x = inv3 * startX + 3 * inv2 * t * ctrl1X + 3 * inv * t2 * ctrl2X + t3 * endX;
+        const y = inv3 * startY + 3 * inv2 * t * ctrl1Y + 3 * inv * t2 * ctrl2Y + t3 * endY;
         const dx = x - startX;
         const dy = y - startY;
         el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
@@ -739,48 +741,80 @@ function removePair(a, b) {
     const endBx = meetX + nx * tileW / 2 - tileW / 2;
     const endBy = meetY + ny * tileW / 2 - tileH / 2;
 
-    // Arc trajectory using quadratic Bezier: single control point per tile
-    // gives one smooth arc without inflection points (no jerky S-curve).
-    // Each tile arcs to the OPPOSITE side of the A→B line so they
-    // visually fly apart before converging at the meeting point.
+    // Arc trajectory using cubic Bezier with two control points per tile:
+    // ctrl1 = "scatter" — tile flies AWAY from partner (outward)
+    // ctrl2 = "converge" — tile curves back toward the meeting point
+    // This creates the effect: tiles scatter apart, then come together.
 
     // Board layout dimensions (pre-transform). Prefer inline style set by renderBoard;
     // fall back to offsetWidth/offsetHeight which also ignore CSS transforms.
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Vertical lift: how high/low the arc peak goes above/below the tiles.
-    // Use the perpendicular distance component so diagonal pairs don't
-    // produce excessively tall arcs that break after clamping.
-    const minLift = tileH;
-    const spaceAbove = Math.min(aCy, bCy);
-    const spaceBelow = boardH - Math.max(aCy, bCy);
-    const vertSign = spaceAbove >= spaceBelow ? -1 : 1; // -1 = arc up, 1 = arc down
-    const rawLift = Math.max(dist * 0.25, minLift);
-    const maxLift = Math.max(spaceAbove, spaceBelow) * 0.8;
-    const liftY = vertSign * Math.min(rawLift, maxLift);
+    // Scatter distance: how far each tile flies outward from its start position.
+    // Symmetric for both tiles to ensure equal horizontal path length.
+    // Minimum ensures visible scatter even for adjacent tiles.
+    const safeDist = Math.max(dist, tileW); // avoid zero/tiny dist issues
+    const scatterDist = Math.max(tileW * 1.5, safeDist * 0.4);
 
-    // Spread amount: how far apart the control points are perpendicular to A→B.
-    // Scales with distance between tiles, minimum 2× tile width.
-    const spreadAmount = Math.max(tileW * 2, dist * 0.6);
+    // Determine scatter direction: perpendicular to A→B line.
+    // For nearly vertical pairs (dx ≈ 0), perpendicular is horizontal (good scatter).
+    // For nearly horizontal pairs (dy ≈ 0), perpendicular is vertical — also correct,
+    // tiles scatter up/down then converge horizontally.
+    // perpX/perpY already handles this correctly as it's orthogonal to (nx,ny).
 
-    // Control points: tile A arcs in +perpendicular direction,
-    // tile B arcs in −perpendicular direction (they fly apart).
-    let ctrlAx = meetX + perpX * spreadAmount - tileW / 2;
-    let ctrlAy = meetY + perpY * spreadAmount - tileH / 2 + liftY;
-    let ctrlBx = meetX - perpX * spreadAmount - tileW / 2;
-    let ctrlBy = meetY - perpY * spreadAmount - tileH / 2 + liftY;
+    // ctrl1 (scatter phase, ~25% of path): tile moves AWAY from partner
+    // Tile A scatters in +perp direction, tile B in -perp direction
+    let ctrl1Ax = aCx + perpX * scatterDist - tileW / 2;
+    let ctrl1Ay = aCy + perpY * scatterDist + (meetY - aCy) * 0.25 - tileH / 2;
+    let ctrl1Bx = bCx - perpX * scatterDist - tileW / 2;
+    let ctrl1By = bCy - perpY * scatterDist + (meetY - bCy) * 0.25 - tileH / 2;
 
-    // Clamp control points to board bounds so arcs stay visible
+    // ctrl2 (converge phase, ~75% of path): tile curves toward meeting point
+    let ctrl2Ax = meetX + perpX * tileW * 0.3 - tileW / 2;
+    let ctrl2Ay = meetY + perpY * tileW * 0.3 - tileH / 2;
+    let ctrl2Bx = meetX - perpX * tileW * 0.3 - tileW / 2;
+    let ctrl2By = meetY - perpY * tileW * 0.3 - tileH / 2;
+
+    // Clamp all control points to board bounds so arcs stay visible.
+    // When clamping reduces one tile's scatter distance, reduce the other's equally
+    // to preserve visual symmetry.
     const pad = tileW * 0.5;
-    function clampToBounds(cx, cy) {
-        return [
-            Math.max(-pad, Math.min(boardW + pad, cx)),
-            Math.max(-pad, Math.min(boardH + pad, cy))
-        ];
+    function clampCtrlPair(x1, y1, x2, y2) {
+        // Clamp each independently first
+        let cx1 = Math.max(-pad, Math.min(boardW + pad, x1));
+        let cy1 = Math.max(-pad, Math.min(boardH + pad, y1));
+        let cx2 = Math.max(-pad, Math.min(boardW + pad, x2));
+        let cy2 = Math.max(-pad, Math.min(boardH + pad, y2));
+        // Symmetric correction: if one was reduced more, shrink the other to match.
+        // Compare the magnitude of displacement from original to clamped.
+        const shrink1 = Math.sqrt((cx1 - x1) ** 2 + (cy1 - y1) ** 2);
+        const shrink2 = Math.sqrt((cx2 - x2) ** 2 + (cy2 - y2) ** 2);
+        if (shrink1 > 0 && shrink1 > shrink2) {
+            // Tile 1 was clamped more — scale tile 2's offset by the same ratio
+            const origDist2 = Math.sqrt((x2 - meetX) ** 2 + (y2 - meetY) ** 2);
+            const clampDist1 = Math.sqrt((cx1 - meetX) ** 2 + (cy1 - meetY) ** 2);
+            const origDist1 = Math.sqrt((x1 - meetX) ** 2 + (y1 - meetY) ** 2);
+            if (origDist1 > 0) {
+                const ratio = clampDist1 / origDist1;
+                cx2 = meetX + (x2 - meetX) * ratio;
+                cy2 = meetY + (y2 - meetY) * ratio;
+            }
+        } else if (shrink2 > 0 && shrink2 > shrink1) {
+            const origDist1 = Math.sqrt((x1 - meetX) ** 2 + (y1 - meetY) ** 2);
+            const clampDist2 = Math.sqrt((cx2 - meetX) ** 2 + (cy2 - meetY) ** 2);
+            const origDist2 = Math.sqrt((x2 - meetX) ** 2 + (y2 - meetY) ** 2);
+            if (origDist2 > 0) {
+                const ratio = clampDist2 / origDist2;
+                cx1 = meetX + (x1 - meetX) * ratio;
+                cy1 = meetY + (y1 - meetY) * ratio;
+            }
+        }
+        return [cx1, cy1, cx2, cy2];
     }
-    [ctrlAx, ctrlAy] = clampToBounds(ctrlAx, ctrlAy);
-    [ctrlBx, ctrlBy] = clampToBounds(ctrlBx, ctrlBy);
+
+    [ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By] = clampCtrlPair(ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By);
+    [ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By] = clampCtrlPair(ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By);
 
     // Duration scales with distance: wider arcs need more time.
     // Capped at 500ms to stay in sync with particle-burst CSS animation (0.5s).
@@ -808,8 +842,8 @@ function removePair(a, b) {
     updateTileStates();
     updateUI();
 
-    animateArc(elA, ax, ay, ctrlAx, ctrlAy, endAx, endAy, duration, onFinish);
-    animateArc(elB, bx, by, ctrlBx, ctrlBy, endBx, endBy, duration, onFinish);
+    animateArc(elA, ax, ay, ctrl1Ax, ctrl1Ay, ctrl2Ax, ctrl2Ay, endAx, endAy, duration, onFinish);
+    animateArc(elB, bx, by, ctrl1Bx, ctrl1By, ctrl2Bx, ctrl2By, endBx, endBy, duration, onFinish);
 }
 
 // Update UI counters
