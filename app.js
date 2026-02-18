@@ -168,6 +168,7 @@ const overlayMessage = document.getElementById('overlay-message');
 const startBtn = document.getElementById('btn-start');
 const hintBtn = document.getElementById('btn-hint');
 const shuffleBtn = document.getElementById('btn-shuffle');
+const pairsAvailableEl = document.getElementById('pairs-available');
 
 // Shuffle an array in place (Fisher-Yates)
 function shuffle(arr) {
@@ -639,7 +640,7 @@ function removePair(a, b) {
     a.removed = true;
     b.removed = true;
     moves++;
-    score += 100;
+    score += 150;
 
     const elA = boardEl.querySelector(`[data-id="${a.id}"]`);
     const elB = boardEl.querySelector(`[data-id="${b.id}"]`);
@@ -751,6 +752,14 @@ function updateUI() {
     tilesLeftEl.textContent = remaining;
     movesEl.textContent = moves;
     scoreEl.textContent = score;
+
+    // Show available pairs count (graceful fallback if element or function unavailable)
+    if (pairsAvailableEl && remaining > 0) {
+        const matches = findAvailableMatches();
+        pairsAvailableEl.textContent = matches ? matches.length : 0;
+    } else if (pairsAvailableEl) {
+        pairsAvailableEl.textContent = 0;
+    }
 }
 
 // Check if game is won or stuck
