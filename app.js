@@ -646,7 +646,9 @@ function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, en
     el.style.willChange = 'transform';
 
     function step(now) {
-        const t = Math.min((now - startTime) / duration, 1);
+        const tLinear = Math.min((now - startTime) / duration, 1);
+        // Ease-out: tiles decelerate as they approach the meeting point
+        const t = 1 - (1 - tLinear) * (1 - tLinear);
         // Cubic bezier: B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
         const inv = 1 - t;
         const inv2 = inv * inv;
@@ -659,7 +661,7 @@ function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, en
         const dx = x - startX;
         const dy = y - startY;
         el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
-        if (t < 1) {
+        if (tLinear < 1) {
             requestAnimationFrame(step);
         } else {
             el.style.willChange = '';
@@ -711,19 +713,19 @@ function removePair(a, b) {
     const dy = bCy - aCy;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Meeting point: both tiles fly to the exact same center point and overlap
-    // before disappearing, creating a collision effect.
+    // Meeting point: midpoint between tile centers
     const meetX = (aCx + bCx) / 2;
     const meetY = (aCy + bCy) / 2;
 
-    // Both tiles fly to the same meeting point (they overlap at the end)
-    const endAx = meetX - tileW / 2;
+    // Tiles meet side-by-side (touching edges) instead of overlapping.
+    // Tile A stops with its right edge at meetX, tile B with its left edge at meetX.
+    const endAx = meetX - tileW;
     const endAy = meetY - tileH / 2;
-    const endBx = meetX - tileW / 2;
+    const endBx = meetX;
     const endBy = meetY - tileH / 2;
 
-    // Arc trajectory using cubic Bezier: tiles first spread apart, then collide.
-    // Two control points per tile create a spread-then-converge path.
+    // Arc trajectory using cubic Bezier: tiles spread apart in a wide arc,
+    // then converge horizontally for a side-collision effect.
 
     // Direction vector from A to B (normalized), with fallback for dist≈0
     let nx, ny;
@@ -743,28 +745,28 @@ function removePair(a, b) {
     const boardW = parseFloat(boardEl.style.width) || 1;
     const boardH = parseFloat(boardEl.style.height) || 1;
 
-    // Scale spread/approach relative to tile size so the arc feels proportional
-    // on any screen size, including the dist≈0 case.
-    const tileRef = (tileW + tileH) / 2; // average tile dimension as reference
-    const spread = Math.min(tileRef * 2.5, Math.max(tileRef * 0.8, dist * 0.45));
-    const approach = Math.min(tileRef * 1.8, Math.max(tileRef * 0.5, dist * 0.3));
+    // Scale spread relative to tile size — wider arc for more dramatic trajectory
+    const tileRef = (tileW + tileH) / 2;
+    const spread = Math.min(tileRef * 4, Math.max(tileRef * 1.5, dist * 0.6));
 
     // Control point 1: pull tile AWAY from partner (spread phase).
-    // Tile A spreads in +perpendicular direction, tile B in -perpendicular.
-    let ctrl1Ax = ax + px * spread;
-    let ctrl1Ay = ay + py * spread;
-    let ctrl1Bx = bx - px * spread;
-    let ctrl1By = by - py * spread;
+    // Also push backward (away from partner along nx/ny) for a rounder initial arc.
+    const pushBack = tileRef * 0.5;
+    let ctrl1Ax = ax + px * spread - nx * pushBack;
+    let ctrl1Ay = ay + py * spread - ny * pushBack;
+    let ctrl1Bx = bx - px * spread + nx * pushBack;
+    let ctrl1By = by - py * spread + ny * pushBack;
 
-    // Control point 2: approach meetPoint from opposite sides (converge phase).
-    // Tile A approaches from one side, tile B from the other.
-    let ctrl2Ax = endAx - px * approach;
-    let ctrl2Ay = endAy - py * approach;
-    let ctrl2Bx = endBx + px * approach;
-    let ctrl2By = endBy + py * approach;
+    // Control point 2: ensure horizontal approach to the meeting point.
+    // Place ctrl2 on the same Y as the endpoint, offset horizontally outward.
+    const approachDist = Math.max(tileRef * 2, dist * 0.5);
+    let ctrl2Ax = endAx - approachDist;
+    let ctrl2Ay = endAy;
+    let ctrl2Bx = endBx + approachDist;
+    let ctrl2By = endBy;
 
     // Clamp all control points to board bounds so arcs don't fly outside the field
-    const pad = tileW * 0.5; // small padding inside board edge
+    const pad = tileW;
     function clampToBounds(cx, cy) {
         return [
             Math.max(-pad, Math.min(boardW + pad, cx)),
@@ -776,9 +778,9 @@ function removePair(a, b) {
     [ctrl2Ax, ctrl2Ay] = clampToBounds(ctrl2Ax, ctrl2Ay);
     [ctrl2Bx, ctrl2By] = clampToBounds(ctrl2Bx, ctrl2By);
 
-    // Duration scales with distance: shorter arcs for nearby tiles, longer for far ones.
-    // Clamped to [300, 500] to stay in sync with particle animation (0.5s CSS).
-    const duration = Math.round(Math.min(500, Math.max(300, 300 + dist * 0.4)));
+    // Duration scales with distance: wider arcs need more time.
+    // Clamped to [400, 650] for a smooth, visible trajectory.
+    const duration = Math.round(Math.min(650, Math.max(400, 350 + dist * 0.5)));
     let finished = 0;
 
     function onFinish() {
