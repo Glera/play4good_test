@@ -41,36 +41,15 @@ body {
 .game-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     padding: 8px 12px;
     flex-shrink: 0;
-}
-
-.header-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background: rgba(80, 50, 20, 0.7);
-    border: 2px solid rgba(180, 140, 80, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-}
-
-.header-btn-icon {
-    font-size: 18px;
-    color: #d4a843;
-    line-height: 1;
 }
 
 .header-stats {
     display: flex;
     gap: 24px;
     justify-content: center;
-    flex: 1;
 }
 
 .stat-item {
