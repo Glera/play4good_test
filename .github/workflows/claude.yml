@@ -48,6 +48,13 @@ jobs:
             core.setOutput('issue_title', issueTitle);
             core.setOutput('issue_number', String(issueNumber));
 
+            // CI option labels (set by bot when creating issue)
+            core.setOutput('multi_agent', labels.includes('ci:multi-agent') ? 'true' : 'false');
+            core.setOutput('testing', labels.includes('ci:testing') ? 'true' : 'false');
+            core.setOutput('approve', labels.includes('ci:approve') ? 'true' : 'false');
+
+            console.log(`CI options: multi_agent=${labels.includes('ci:multi-agent')}, testing=${labels.includes('ci:testing')}, approve=${labels.includes('ci:approve')}`);
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -100,15 +107,17 @@ jobs:
             chmod +x ./codex-review.sh
           fi
 
-      - name: Setup Node.js (for Playwright)
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Install Playwright
-        run: |
-          npm ci
-          npx playwright install chromium
+        if: steps.dev.outputs.testing == 'true'
+        run: npx playwright install chromium
 
       # ============================================================
       # NOTIFY: Claude started
@@ -206,6 +215,7 @@ jobs:
 
       - name: "Phase 2: Codex plan review"
         id: codex_plan
+        if: steps.dev.outputs.multi_agent == 'true'
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -231,6 +241,7 @@ jobs:
 
       # --- Notify: Codex plan review ---
       - name: "Notify: Phase 2 — Codex plan review"
+        if: steps.dev.outputs.multi_agent == 'true'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -243,6 +254,73 @@ jobs:
           else
             ./notify.sh info "Phase 2 — Codex ревью пропущено (нет плана)"
           fi
+
+      # ============================================================
+      # APPROVAL GATE (optional: wait for developer approval)
+      # ============================================================
+
+      - name: "Approval Gate: Request developer approval"
+        id: approval_gate
+        if: steps.dev.outputs.approve == 'true'
+        continue-on-error: true
+        env:
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+        run: |
+          # Send plan summary to bot for approval
+          PLAN_TEXT=""
+          if [ -f /tmp/plan.md ]; then
+            PLAN_TEXT=$(cat /tmp/plan.md | head -30)
+          fi
+
+          CODEX_TEXT=""
+          if [ -f /tmp/codex-plan-review.txt ]; then
+            CODEX_TEXT=$(head -10 /tmp/codex-plan-review.txt)
+          fi
+
+          SUMMARY="${PLAN_TEXT}"
+          if [ -n "$CODEX_TEXT" ]; then
+            SUMMARY="${SUMMARY}\n\n--- Codex Review ---\n${CODEX_TEXT}"
+          fi
+
+          # Request approval via bot (sends Telegram message with buttons)
+          # Use jq for safe JSON encoding
+          JSON_BODY=$(jq -n \
+            --arg branch "$DEV_BRANCH" \
+            --arg issue_number "$ISSUE_NUMBER" \
+            --arg plan_summary "$SUMMARY" \
+            '{branch: $branch, issue_number: $issue_number, plan_summary: $plan_summary}')
+
+          curl -s -X POST "$BOT_NOTIFY_URL/ci/request-approval" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_BODY"
+
+          echo "⏳ Waiting for developer approval (max 15 min)..."
+
+          # Poll for approval every 30 seconds, up to 30 attempts (15 min)
+          for i in $(seq 1 30); do
+            sleep 30
+            RESULT=$(curl -s "$BOT_NOTIFY_URL/ci/check-approval?branch=$DEV_BRANCH&issue_number=$ISSUE_NUMBER")
+            STATUS=$(echo "$RESULT" | jq -r '.status')
+
+            if [ "$STATUS" = "approved" ]; then
+              echo "✅ Plan approved by developer"
+              echo "PLAN_APPROVED=true" >> "$GITHUB_ENV"
+              exit 0
+            elif [ "$STATUS" = "rejected" ]; then
+              echo "❌ Plan rejected by developer"
+              echo "PLAN_APPROVED=false" >> "$GITHUB_ENV"
+              ./notify.sh error "План отклонён разработчиком. CI остановлен."
+              exit 1
+            fi
+            echo "⏳ Waiting... ($i/30)"
+          done
+
+          echo "⏰ Approval timeout (15 min) — stopping CI"
+          echo "PLAN_APPROVED=false" >> "$GITHUB_ENV"
+          ./notify.sh error "Таймаут ожидания апрува плана (15 мин). CI остановлен."
+          exit 1
 
       # ============================================================
       # PHASE 3: IMPLEMENT (Claude implements with plan + review)
@@ -355,6 +433,7 @@ jobs:
 
       - name: "Phase 4: Codex code review"
         id: codex_code
+        if: steps.dev.outputs.multi_agent == 'true'
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -387,6 +466,7 @@ jobs:
 
       # --- Notify: Codex code review ---
       - name: "Notify: Phase 4 — Codex code review"
+        if: steps.dev.outputs.multi_agent == 'true'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -407,7 +487,7 @@ jobs:
       # Fix issues found by code review (one pass)
       - name: "Phase 4: Fix review issues"
         id: fix_review
-        if: env.CODE_REVIEW_OK == 'false'
+        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -449,7 +529,7 @@ jobs:
 
       # --- Notify: Phase 4 fix result ---
       - name: "Notify: Phase 4 — Fix applied"
-        if: env.CODE_REVIEW_OK == 'false'
+        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false'
         continue-on-error: true
         env:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
@@ -468,6 +548,7 @@ jobs:
 
       - name: "Phase 5a: Run smoke tests"
         id: e2e_smoke
+        if: steps.dev.outputs.testing == 'true'
         continue-on-error: true
         env:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
@@ -497,6 +578,7 @@ jobs:
 
       - name: "Phase 5b: Run performance tests"
         id: e2e_perf
+        if: steps.dev.outputs.testing == 'true'
         continue-on-error: true
         env:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
@@ -526,7 +608,7 @@ jobs:
       # Auto-fix smoke failures
       - name: "Phase 5: Fix smoke test failures"
         id: fix_smoke
-        if: env.SMOKE_OK == 'false'
+        if: steps.dev.outputs.testing == 'true' && env.SMOKE_OK == 'false'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -569,7 +651,7 @@ jobs:
       # Auto-fix performance regressions
       - name: "Phase 5: Fix performance regressions"
         id: fix_perf
-        if: env.PERF_OK == 'false'
+        if: steps.dev.outputs.testing == 'true' && env.PERF_OK == 'false'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
