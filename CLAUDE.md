@@ -64,19 +64,35 @@
 
 ## Мульти-агентный workflow (CI)
 
-GitHub Actions запускает 5-фазный pipeline при создании issue:
+GitHub Actions запускает pipeline при создании issue. Шаги зависят от опций тикета:
 
 ```
-Phase 1: Plan     — Claude (Opus) читает issue, пишет план в /tmp/plan.md
-Phase 2: Review   — Codex 5.2 ревьюит план, замечания в /tmp/codex-plan-review.txt
-Phase 3: Implement — Claude реализует с учётом плана + замечаний Codex
-Phase 4: Code Review — Codex ревьюит diff, Claude фиксит замечания (1 проход)
-Phase 5a: Smoke Tests — функциональные тесты, при ошибках Claude автофиксит
-Phase 5b: Performance — бенчмарки, при регрессии Claude оптимизирует
+Phase 1: Plan          — Claude (Opus) читает issue, пишет план в /tmp/plan.md
+Phase 2: Codex Review  — Codex 5.2 ревьюит план (если multi_agent)
+Approval Gate          — Ожидание апрува плана в Telegram (если approve)
+  ├── ✅ Одобрить       — продолжить
+  ├── ✏️ Поправки       — Claude переделывает план с учётом фидбека (макс 3 ревизии)
+  └── ❌ Отклонить       — CI остановлен
+Phase 3: Implement     — Claude реализует с учётом плана + замечаний Codex
+Phase 4: Code Review   — Codex ревьюит diff, Claude фиксит замечания (если multi_agent)
+Phase 5a: Smoke Tests  — функциональные тесты, при ошибках Claude автофиксит (если testing)
+Phase 5b: Performance  — бенчмарки, при регрессии Claude оптимизирует (если testing)
+Финализация            — DEVLOG.md, push, close issue
 ```
 
 Все фазы отправляют статус в Telegram через `notify.sh`.
 Если Opus не справился — fallback на Sonnet.
+
+### Опции тикета (устанавливаются через бота)
+- **multi_agent** — включает Codex ревью (Phase 2 + 4)
+- **testing** — включает Playwright тесты (Phase 5)
+- **approve** — включает Approval Gate с кнопками в Telegram
+
+### Cherry-pick workflow
+После завершения задачи в Telegram приходит кнопка **"⭐ Забрать в main"**:
+- Добавляет лейбл `cherry-pick` на GitHub issue
+- Обновляет DEVLOG.md: статус меняется с "✅ готово к переносу" на "⭐ забрать в main"
+- Фильтровать помеченные: `gh issue list --label cherry-pick --state closed`
 
 ### Performance бюджеты (tests/e2e/performance.spec.ts)
 - DOMContentLoaded: < 2s
