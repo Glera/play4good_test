@@ -546,39 +546,45 @@ function onTileClick(tile) {
         const el = boardEl.querySelector(`[data-id="${tile.id}"]`);
         if (el) {
             // If already shaking (rapid re-click), clean up first
-            if (el._shakeTimer) {
-                clearTimeout(el._shakeTimer);
-                el._shakeTimer = null;
+            if (el._shakeCleanup) {
+                el._shakeCleanup();
             }
             el.classList.remove('shake', 'no-transition');
             // Force reflow so re-adding the class restarts the animation
             void el.offsetWidth;
             el.classList.add('shake');
 
+            let cleaned = false;
+
             function endShake() {
-                if (el._shakeTimer) {
-                    clearTimeout(el._shakeTimer);
-                    el._shakeTimer = null;
-                }
+                if (cleaned) return;
+                cleaned = true;
+                // Remove both listener and timer to prevent double-fire
+                el.removeEventListener('animationend', handler);
+                clearTimeout(timer);
+                el._shakeCleanup = null;
                 // Suppress transitions BEFORE removing shake to prevent
-                // the browser from animating the transform change
+                // the browser from animating the transform change.
+                // Use a single reflow for both class changes.
                 el.classList.add('no-transition');
                 el.classList.remove('shake');
-                // Force reflow so the browser applies no-transition + removed shake
                 void el.offsetWidth;
-                // Now safe to re-enable transitions
                 el.classList.remove('no-transition');
             }
 
-            el.addEventListener('animationend', function handler(e) {
+            function handler(e) {
                 if (e.animationName !== 'tile-shake') return;
-                el.removeEventListener('animationend', handler);
                 endShake();
-            });
+            }
+
+            el.addEventListener('animationend', handler);
 
             // Safety timeout: if animationend doesn't fire (WebView quirk),
-            // clean up after the animation duration + margin
-            el._shakeTimer = setTimeout(endShake, 500);
+            // clean up after the CSS animation duration (0.4s) + small margin
+            const timer = setTimeout(endShake, 450);
+
+            // Store cleanup function for rapid re-click cancellation
+            el._shakeCleanup = endShake;
         }
         return;
     }
