@@ -739,29 +739,46 @@ function removePair(a, b) {
     const px = -ny;
     const py = nx;
 
-    // Spread distance: how far tiles fly apart before converging.
-    // Clamped to avoid flying off-screen on mobile (max 120px).
-    const spread = Math.min(120, Math.max(40, dist * 0.45));
+    // Board dimensions for bounds clamping
+    const boardW = parseFloat(boardEl.style.width) || 1;
+    const boardH = parseFloat(boardEl.style.height) || 1;
 
-    // Approach distance: how far the "run-up" to the meeting point is.
-    // This pulls control point 2 back from meetPoint along the arrival direction.
-    const approach = Math.min(80, Math.max(20, dist * 0.3));
+    // Scale spread/approach relative to tile size so the arc feels proportional
+    // on any screen size, including the dist≈0 case.
+    const tileRef = (tileW + tileH) / 2; // average tile dimension as reference
+    const spread = Math.min(tileRef * 2.5, Math.max(tileRef * 0.8, dist * 0.45));
+    const approach = Math.min(tileRef * 1.8, Math.max(tileRef * 0.5, dist * 0.3));
 
     // Control point 1: pull tile AWAY from partner (spread phase).
     // Tile A spreads in +perpendicular direction, tile B in -perpendicular.
-    const ctrl1Ax = ax + px * spread;
-    const ctrl1Ay = ay + py * spread;
-    const ctrl1Bx = bx - px * spread;
-    const ctrl1By = by - py * spread;
+    let ctrl1Ax = ax + px * spread;
+    let ctrl1Ay = ay + py * spread;
+    let ctrl1Bx = bx - px * spread;
+    let ctrl1By = by - py * spread;
 
     // Control point 2: approach meetPoint from opposite sides (converge phase).
     // Tile A approaches from one side, tile B from the other.
-    const ctrl2Ax = endAx - px * approach;
-    const ctrl2Ay = endAy - py * approach;
-    const ctrl2Bx = endBx + px * approach;
-    const ctrl2By = endBy + py * approach;
+    let ctrl2Ax = endAx - px * approach;
+    let ctrl2Ay = endAy - py * approach;
+    let ctrl2Bx = endBx + px * approach;
+    let ctrl2By = endBy + py * approach;
 
-    const duration = 500;
+    // Clamp all control points to board bounds so arcs don't fly outside the field
+    const pad = tileW * 0.5; // small padding inside board edge
+    function clampToBounds(cx, cy) {
+        return [
+            Math.max(-pad, Math.min(boardW + pad, cx)),
+            Math.max(-pad, Math.min(boardH + pad, cy))
+        ];
+    }
+    [ctrl1Ax, ctrl1Ay] = clampToBounds(ctrl1Ax, ctrl1Ay);
+    [ctrl1Bx, ctrl1By] = clampToBounds(ctrl1Bx, ctrl1By);
+    [ctrl2Ax, ctrl2Ay] = clampToBounds(ctrl2Ax, ctrl2Ay);
+    [ctrl2Bx, ctrl2By] = clampToBounds(ctrl2Bx, ctrl2By);
+
+    // Duration scales with distance: shorter arcs for nearby tiles, longer for far ones.
+    // Clamped to [300, 500] to stay in sync with particle animation (0.5s CSS).
+    const duration = Math.round(Math.min(500, Math.max(300, 300 + dist * 0.4)));
     let finished = 0;
 
     function onFinish() {
