@@ -256,22 +256,26 @@ jobs:
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-          BRANCH_CTX=""
-          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
+          ISSUE_BODY=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${ISSUE_NUM}" | jq -r '.body // ""')
 
           cat > /tmp/plan-context.txt << CONTEXT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
           TASK: Create a detailed implementation plan for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
 
-          ${BRANCH_CTX}
-
-          Read the issue body from GitHub:
-          $(cat /dev/stdin <<< "$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/issues/${ISSUE_NUM}" | jq -r '.body // ""')")
+          Issue body:
+          ${ISSUE_BODY}
 
           Start by reading CLAUDE.md, then explore the codebase.
           Write the plan to /tmp/plan.md.
           CONTEXT_EOF
+
+          # Append branch context safely (no shell interpolation)
+          if [ -s /tmp/branch-context-section.txt ]; then
+            printf "\n\n" >> /tmp/plan-context.txt
+            cat /tmp/branch-context-section.txt >> /tmp/plan-context.txt
+          fi
 
           echo "=== Phase 1: Planning (Codex) ==="
           ./codex-agent.sh plan /tmp/plan-context.txt 2>&1 | tee /tmp/phase1-output.txt
@@ -452,9 +456,6 @@ jobs:
 
             CURRENT_PLAN=$(cat /tmp/plan.md 2>/dev/null || echo "")
 
-            BRANCH_CTX=""
-            [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
-
             cat > /tmp/revise-prompt.txt << REVISE_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
@@ -466,8 +467,6 @@ jobs:
           DEVELOPER FEEDBACK (address these concerns):
           ${FEEDBACK}
 
-          ${BRANCH_CTX}
-
           INSTRUCTIONS:
           1. Read the developer's feedback carefully
           2. Revise your plan in /tmp/plan.md addressing their concerns
@@ -475,6 +474,12 @@ jobs:
           4. DO NOT implement anything — only update the plan
           5. Stay on the current branch
           REVISE_EOF
+
+            # Append branch context safely (no shell interpolation)
+            if [ -s /tmp/branch-context-section.txt ]; then
+              printf "\n\n" >> /tmp/revise-prompt.txt
+              cat /tmp/branch-context-section.txt >> /tmp/revise-prompt.txt
+            fi
 
             claude -p --dangerously-skip-permissions \
               --model claude-opus-4-6 \
@@ -522,9 +527,6 @@ jobs:
             REVIEW=$(cat /tmp/codex-plan-review.txt)
           fi
 
-          BRANCH_CTX=""
-          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
-
           cat > /tmp/implement-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
@@ -535,8 +537,6 @@ jobs:
 
           REVIEWER FEEDBACK (address any concerns):
           ${REVIEW}
-
-          ${BRANCH_CTX}
 
           WORKFLOW:
           1. Read CLAUDE.md for project rules
@@ -562,6 +562,12 @@ jobs:
           - Follow project conventions from CLAUDE.md
           - Once pushed, STOP — do not loop
           PROMPT_EOF
+
+          # Append branch context safely (no shell interpolation of context content)
+          if [ -s /tmp/branch-context-section.txt ]; then
+            printf "\n\n" >> /tmp/implement-prompt.txt
+            cat /tmp/branch-context-section.txt >> /tmp/implement-prompt.txt
+          fi
 
           echo "=== Phase 3: Implementing (Opus) ==="
           set +e
@@ -628,9 +634,6 @@ jobs:
             REVIEW=$(cat /tmp/codex-plan-review.txt)
           fi
 
-          BRANCH_CTX=""
-          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
-
           cat > /tmp/impl-context.txt << CONTEXT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
@@ -642,8 +645,6 @@ jobs:
           REVIEWER FEEDBACK (address any concerns):
           ${REVIEW}
 
-          ${BRANCH_CTX}
-
           After implementing:
           1. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
           2. git push origin ${BRANCH}
@@ -652,6 +653,12 @@ jobs:
 
           Stay on branch ${BRANCH}. Follow project conventions from CLAUDE.md.
           CONTEXT_EOF
+
+          # Append branch context safely (no shell interpolation of context content)
+          if [ -s /tmp/branch-context-section.txt ]; then
+            printf "\n\n" >> /tmp/impl-context.txt
+            cat /tmp/branch-context-section.txt >> /tmp/impl-context.txt
+          fi
 
           echo "=== Phase 3: Implementing (Codex) ==="
           ./codex-agent.sh implement /tmp/impl-context.txt 2>&1 | tee /tmp/phase3-output.txt
@@ -1062,15 +1069,10 @@ jobs:
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-          BRANCH_CTX=""
-          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
-
           cat > /tmp/sonnet-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
           TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
-
-          ${BRANCH_CTX}
 
           WORKFLOW:
           1. ./notify.sh plan "Your plan"
@@ -1085,6 +1087,12 @@ jobs:
           - Make clean, focused changes
           - Once pushed, STOP
           PROMPT_EOF
+
+          # Append branch context safely (no shell interpolation of context content)
+          if [ -s /tmp/branch-context-section.txt ]; then
+            printf "\n\n" >> /tmp/sonnet-prompt.txt
+            cat /tmp/branch-context-section.txt >> /tmp/sonnet-prompt.txt
+          fi
 
           set +e
           claude -p --dangerously-skip-permissions \
@@ -1403,16 +1411,18 @@ jobs:
             fi
           } >> .claude/branch-context.md
 
-          # Rotate if too large: keep header (first 6 lines) + last ~50KB
-          # 50KB ≈ 15K tokens ≈ 7% of Claude's 200K context — negligible overhead
+          # Rotate if too large: keep header (first 6 lines) + last ~180KB
+          # 180KB ≈ 54K tokens ≈ 27% of Claude's 200K context
+          # Each entry ~20-25KB → retains ~8-10 recent tickets (vs 2-3 at old 50KB limit)
+          # In IDE, chat history naturally occupies ~80% of context — this is still conservative
           CTX_SIZE=$(wc -c < .claude/branch-context.md)
-          if [ "$CTX_SIZE" -gt 60000 ]; then
-            echo "Branch context rotating ($CTX_SIZE bytes → ~50KB)..."
+          if [ "$CTX_SIZE" -gt 200000 ]; then
+            echo "Branch context rotating ($CTX_SIZE bytes → ~180KB)..."
             head -6 .claude/branch-context.md > /tmp/ctx-rotated.md
             echo "" >> /tmp/ctx-rotated.md
             echo "[older entries trimmed — $(date +%Y-%m-%d)]" >> /tmp/ctx-rotated.md
             echo "" >> /tmp/ctx-rotated.md
-            tail -c 50000 .claude/branch-context.md >> /tmp/ctx-rotated.md
+            tail -c 180000 .claude/branch-context.md >> /tmp/ctx-rotated.md
             mv /tmp/ctx-rotated.md .claude/branch-context.md
           fi
 
