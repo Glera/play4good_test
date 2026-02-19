@@ -1048,10 +1048,10 @@ jobs:
             "$(cat /tmp/fix-perf-prompt.txt)"
 
       # ============================================================
-      # SONNET FALLBACK (if all Opus attempts failed)
+      # SONNET FALLBACK (if Opus attempts failed — NOT used when Codex implements)
       # ============================================================
 
-      - name: Check if Opus succeeded
+      - name: Check if implementation succeeded
         if: always()
         id: opus_result
         run: |
@@ -1063,13 +1063,13 @@ jobs:
           fi
 
       - name: Reset for Sonnet
-        if: steps.opus_result.outputs.ok == 'false'
+        if: steps.opus_result.outputs.ok == 'false' && steps.dev.outputs.codex_impl != 'true'
         run: |
           git checkout -- . 2>/dev/null || true
           git clean -fd 2>/dev/null || true
 
       - name: "Notify: switching to Sonnet"
-        if: steps.opus_result.outputs.ok == 'false' && steps.dev.outputs.branch != ''
+        if: steps.opus_result.outputs.ok == 'false' && steps.dev.outputs.codex_impl != 'true' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
@@ -1078,7 +1078,7 @@ jobs:
 
       - name: "Claude Code — Sonnet (fallback)"
         id: sonnet
-        if: steps.opus_result.outputs.ok == 'false'
+        if: steps.opus_result.outputs.ok == 'false' && steps.dev.outputs.codex_impl != 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
