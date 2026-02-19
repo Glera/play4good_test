@@ -2,7 +2,7 @@ name: Claude Code (Multi-Agent)
 
 on:
   issues:
-    types: [opened]
+    types: [labeled]
 
 permissions:
   contents: write
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   claude:
-    if: github.event_name == 'issues'
+    if: github.event.action == 'labeled' && github.event.label.name == 'queue:execute'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
