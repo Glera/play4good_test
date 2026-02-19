@@ -165,6 +165,15 @@ body {
     box-shadow: 0 0 10px rgba(52, 199, 89, 0.5);
 }
 
+/* Flying tiles (during removal arc animation) — always above all other tiles.
+   CSS class is more reliable than inline zIndex in mobile WebView compositing.
+   transition:none prevents CSS transition from conflicting with rAF animation. */
+.mahjong-tile.flying {
+    z-index: 10000 !important;
+    transition: none !important;
+    pointer-events: none;
+}
+
 /* Particle burst */
 .match-particle {
     position: absolute;

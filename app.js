@@ -645,6 +645,7 @@ function createParticles(x, y) {
 // Both phases cover equal vertical distance and equal time
 function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, duration, onContact) {
     const startTime = performance.now();
+    el.classList.add('flying'); // belt-and-suspenders: ensure flying class even on direct call
     el.style.pointerEvents = 'none';
     el.style.zIndex = 10000;
     el.style.willChange = 'transform';
@@ -682,7 +683,12 @@ function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, dur
         if (t < 1) {
             requestAnimationFrame(step);
         } else {
+            // Clean up flying state: remove class and inline overrides
+            // so no "dirty" state remains if element survives (e.g. error path)
+            el.classList.remove('flying');
             el.style.willChange = '';
+            el.style.zIndex = '';
+            el.style.pointerEvents = '';
             if (!contactFired) {
                 contactFired = true;
                 if (onContact) onContact();
@@ -726,7 +732,14 @@ function removePair(a, b) {
         return;
     }
 
+    // Add .flying class BEFORE any inline style — CSS class reliably elevates
+    // tiles above all others in WebView compositing and disables CSS transitions
+    // that would conflict with the rAF arc animation
+    elA.classList.add('flying');
+    elB.classList.add('flying');
+
     // Elevate flying tiles above all other tiles (highest z-index)
+    // Belt-and-suspenders: inline style + CSS class for max compatibility
     elA.style.zIndex = 10000;
     elB.style.zIndex = 10000;
 
