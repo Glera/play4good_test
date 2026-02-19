@@ -765,11 +765,10 @@ function removePair(a, b) {
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Egg-curve amplitude: lateral scatter distance (3–5× tileW, clamped to board)
+    // Egg-curve amplitude: lateral scatter distance (3.5× tileW, clamped to 40% of board)
     const boardSpan = Math.min(boardW, boardH);
     const maxAmplitude = boardSpan * 0.4;
-    const idealAmplitude = tileW * 3.5;
-    const amplitude = Math.min(Math.max(tileW * 3, idealAmplitude), tileW * 5, maxAmplitude);
+    const amplitude = Math.min(tileW * 3.5, maxAmplitude);
 
     // Duration scales with distance for smooth arc animation
     const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
