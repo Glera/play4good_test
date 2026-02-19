@@ -645,10 +645,7 @@ function createParticles(x, y) {
 // Both phases cover equal vertical distance and equal time
 function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, duration, onContact) {
     const startTime = performance.now();
-    el.classList.add('flying'); // belt-and-suspenders: ensure flying class even on direct call
-    el.style.pointerEvents = 'none';
-    el.style.zIndex = 10000;
-    el.style.willChange = 'transform';
+    el.classList.add('flying');
     let contactFired = false;
     const tContact = 0.98;
 
@@ -683,12 +680,7 @@ function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, dur
         if (t < 1) {
             requestAnimationFrame(step);
         } else {
-            // Clean up flying state: remove class and inline overrides
-            // so no "dirty" state remains if element survives (e.g. error path)
             el.classList.remove('flying');
-            el.style.willChange = '';
-            el.style.zIndex = '';
-            el.style.pointerEvents = '';
             if (!contactFired) {
                 contactFired = true;
                 if (onContact) onContact();
@@ -731,17 +723,6 @@ function removePair(a, b) {
         checkGameState();
         return;
     }
-
-    // Add .flying class BEFORE any inline style — CSS class reliably elevates
-    // tiles above all others in WebView compositing and disables CSS transitions
-    // that would conflict with the rAF arc animation
-    elA.classList.add('flying');
-    elB.classList.add('flying');
-
-    // Elevate flying tiles above all other tiles (highest z-index)
-    // Belt-and-suspenders: inline style + CSS class for max compatibility
-    elA.style.zIndex = 10000;
-    elB.style.zIndex = 10000;
 
     // Get current positions (top-left corner of each tile)
     const ax = parseFloat(elA.style.left);
@@ -1194,8 +1175,22 @@ function generateSolvableLayout(positions) {
     return assignment;
 }
 
+// Clean up any in-flight animation state (flying tiles, stale flags).
+// Called on game reset to prevent "dirty" state when animations are interrupted.
+function cleanupFlyingTiles() {
+    const flyingEls = boardEl.querySelectorAll('.mahjong-tile.flying');
+    for (const el of flyingEls) {
+        el.classList.remove('flying');
+    }
+    for (const t of tiles) {
+        if (t.removing) t.removing = false;
+    }
+}
+
 // Start a new game
 function startGame() {
+    cleanupFlyingTiles();
+    shuffleInProgress = false;
     const positions = getTurtleLayout();
     const assignment = generateSolvableLayout(positions);
 
