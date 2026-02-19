@@ -6,6 +6,7 @@
 BOT_URL="${BOT_NOTIFY_URL:-https://play4good-bot.onrender.com}"
 BRANCH="${DEV_BRANCH:-${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}}"
 ISSUE_NUMBER="${ISSUE_NUMBER:-0}"
+PHASE="${PHASE_NAME:-}"
 
 TYPE="${1:-info}"
 shift
@@ -25,7 +26,8 @@ if command -v jq &>/dev/null; then
     --arg issue_number "$ISSUE_NUMBER" \
     --arg type "$TYPE" \
     --arg text "$MESSAGE" \
-    '{branch: $branch, issue_number: $issue_number, type: $type, text: $text}')
+    --arg phase "$PHASE" \
+    '{branch: $branch, issue_number: $issue_number, type: $type, text: $text, phase_name: $phase}')
 elif command -v python3 &>/dev/null; then
   JSON_BODY=$(python3 -c "
 import json, sys
@@ -33,12 +35,14 @@ print(json.dumps({
     'branch': sys.argv[1],
     'issue_number': sys.argv[2],
     'type': sys.argv[3],
-    'text': sys.argv[4]
-}))" "$BRANCH" "$ISSUE_NUMBER" "$TYPE" "$MESSAGE")
+    'text': sys.argv[4],
+    'phase_name': sys.argv[5]
+}))" "$BRANCH" "$ISSUE_NUMBER" "$TYPE" "$MESSAGE" "$PHASE")
 else
   # Last resort: basic escaping (handles newlines, quotes, backslashes)
   SAFE_MSG=$(printf '%s' "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' ')
-  JSON_BODY="{\"branch\":\"$BRANCH\",\"issue_number\":\"$ISSUE_NUMBER\",\"type\":\"$TYPE\",\"text\":\"$SAFE_MSG\"}"
+  SAFE_PHASE=$(printf '%s' "$PHASE" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  JSON_BODY="{\"branch\":\"$BRANCH\",\"issue_number\":\"$ISSUE_NUMBER\",\"type\":\"$TYPE\",\"text\":\"$SAFE_MSG\",\"phase_name\":\"$SAFE_PHASE\"}"
 fi
 
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BOT_URL/claude/message" \
