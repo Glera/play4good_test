@@ -6,7 +6,7 @@
 # Env vars (all optional except OPENAI_API_KEY):
 #   CODEX_MODEL          — model id (default: gpt-5.2-codex)
 #   CODEX_REASONING      — reasoning effort: none|low|medium|high (default: low)
-#   CODEX_MAX_OUTPUT     — max_output_tokens per turn (default: 1400)
+#   CODEX_MAX_OUTPUT     — max_output_tokens per turn (default: plan=1400, implement=4096)
 #   MAX_CODEX_TURNS      — max turns per session (default: 12)
 #   CODEX_MAX_SESSIONS   — max session restarts via checkpoint (default: 3)
 #   REPO_CACHE_KEY       — prompt cache key (default: repo:$GITHUB_REPOSITORY:agent:v1)
@@ -16,7 +16,7 @@
 #
 # Token optimization:
 #   - reasoning.effort: low by default, auto-escalates to medium on build failure
-#   - max_output_tokens: 1400 (tight), auto-reduced if reasoning ratio too high
+#   - max_output_tokens: 1400 (plan) / 4096 (implement), auto-reduced if reasoning ratio too high
 #   - max_tool_calls: 6 (plan) / profile-dependent (implement)
 #   - parallel_tool_calls: false (plan) / true (implement)
 #   - truncation: auto (safety net for long conversations)
@@ -32,9 +32,18 @@ SESSION_TURNS="${MAX_CODEX_TURNS:-12}"
 MAX_SESSIONS="${CODEX_MAX_SESSIONS:-3}"
 MODEL="${CODEX_MODEL:-gpt-5.2-codex}"
 REASONING_EFFORT="${CODEX_REASONING:-low}"
-MAX_OUTPUT="${CODEX_MAX_OUTPUT:-1400}"
 CACHE_KEY="${REPO_CACHE_KEY:-repo:${GITHUB_REPOSITORY:-local}:agent:v1}"
 PROFILE="${CODEX_PROFILE:-small}"
+
+# Mode-dependent max_output: plan needs small output (text plan),
+# implement needs large output (apply_patch with full code + reasoning overhead)
+if [ -n "${CODEX_MAX_OUTPUT:-}" ]; then
+  MAX_OUTPUT="$CODEX_MAX_OUTPUT"
+elif [ "$MODE" = "plan" ]; then
+  MAX_OUTPUT=1400
+else
+  MAX_OUTPUT=4096
+fi
 
 if [ -z "${OPENAI_API_KEY:-}" ]; then
   echo "Error: OPENAI_API_KEY not set" >&2
@@ -331,13 +340,16 @@ log_usage() {
   echo "  Usage: in=${t_in} cached=${t_cached} out=${t_out} reasoning=${t_reason} | total: in=${TOTAL_INPUT} out=${TOTAL_OUTPUT} reasoning=${TOTAL_REASONING}" >&2
 
   # Auto-gate: if reasoning/output > 0.6 twice in a row → reduce max_output by 20%
+  # Floor: plan=400, implement=2000 (implement needs room for apply_patch)
   if [ "$t_out" -gt 0 ]; then
     local ratio_pct=$(( (t_reason * 100) / t_out ))
     if [ "$ratio_pct" -gt 60 ]; then
       HIGH_RATIO_COUNT=$((HIGH_RATIO_COUNT + 1))
       if [ "$HIGH_RATIO_COUNT" -ge 2 ]; then
         local new_max=$(( (MAX_OUTPUT * 80) / 100 ))
-        [ "$new_max" -lt 400 ] && new_max=400
+        local floor=400
+        [ "$MODE" = "implement" ] && floor=2000
+        [ "$new_max" -lt "$floor" ] && new_max=$floor
         echo "  [auto-gate] reasoning ratio ${ratio_pct}% twice — max_output: ${MAX_OUTPUT} → ${new_max}" >&2
         MAX_OUTPUT=$new_max
         HIGH_RATIO_COUNT=0
@@ -495,7 +507,22 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
     fi
 
     if [ "$HAS_FUNCTION_CALLS" = "false" ]; then
-      FINAL_TEXT=$(echo "$OUTPUT" | jq -r '[.[] | select(.type == "message") | .content[]? | select(.type == "output_text") | .text] | join("\n")' 2>/dev/null || echo "Agent completed")
+      FINAL_TEXT=$(echo "$OUTPUT" | jq -r '[.[] | select(.type == "message") | .content[]? | select(.type == "output_text") | .text] | join("\n")' 2>/dev/null || echo "")
+
+      # Detect "all-reasoning, no content" truncation: model used all output tokens
+      # on reasoning, leaving 0 for tool calls/text. Don't treat as completion — retry.
+      if [ -z "$FINAL_TEXT" ] || [ "$FINAL_TEXT" = "null" ]; then
+        local t_out_last t_reason_last
+        t_out_last=$(echo "$BODY" | jq '.usage.output_tokens // 0')
+        t_reason_last=$(echo "$BODY" | jq '.usage.output_tokens_details.reasoning_tokens // 0')
+        if [ "$t_reason_last" -gt 0 ] && [ "$t_reason_last" -ge "$t_out_last" ]; then
+          echo "  [warning] All output tokens consumed by reasoning ($t_reason_last/$t_out_last) — output truncated. Continuing..." >&2
+          # Send an empty tool output to keep the conversation going
+          INPUT='[{"role": "user", "content": "Your previous response was truncated (reasoning used all output tokens). Please continue with the implementation. Output your code change now."}]'
+          continue
+        fi
+      fi
+
       echo "$FINAL_TEXT"
       COMPLETED=true
       break
