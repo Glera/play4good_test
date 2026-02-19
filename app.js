@@ -160,6 +160,7 @@ let lastRenderedLayout = null; // Store layout from last renderBoard call
 // DOM elements
 const boardEl = document.getElementById('game-board');
 const tilesLeftEl = document.getElementById('tiles-left');
+const scoreDisplayEl = document.getElementById('score-display');
 const overlay = document.getElementById('game-overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayMessage = document.getElementById('overlay-message');
@@ -862,6 +863,7 @@ let pairsRafId = null;
 function updateUI() {
     const remaining = tiles.filter(t => !t.removed).length;
     tilesLeftEl.textContent = remaining;
+    if (scoreDisplayEl) scoreDisplayEl.textContent = score;
 
     // Schedule debounced pairs count update (expensive O(n²) operation)
     if (pairsAvailableEl) {
