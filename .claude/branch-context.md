@@ -580,3 +580,68 @@ Files:
  1 file changed, 35 insertions(+)
 ```
 
+
+---
+
+## #167 — тестовый тикет после добавление мульти-репозитория в логику бота (2026-02-19)
+Commit: 25bacad
+Files: 
+
+### Plan
+# Plan: Issue #167 — тестовый тикет после добавление мульти-репозитория в логику бота
+
+## Суть
+Тестовый тикет для проверки что CI pipeline корректно работает после добавления поля `repo` во все webhook payloads (коммит 6a11387). Кодовых изменений не требуется — тикет проверяет что:
+1. Бот корректно роутит тикеты с новым полем `repo` в payload
+2. CI воркфлоу триггерится через `queue:execute` лейбл
+3. Агент получает и обрабатывает тикет на правильной ветке (`dev/Gleb`)
+4. Уведомления через `notify.sh` (с полем `repo`) доходят в Telegram
+
+## Изменения кода
+Никаких изменений кода не требуется — это тестовый тикет без задачи на реализацию.
+
+## Файлы для изменения
+- `DEVLOG.md` — добавить запись о тестовом прогоне мульти-репозитория
+
+## Что будет сделано
+1. Отправить `notify.sh plan` — подтверждение что агент запустился
+2. Подтвердить что pipeline отработал корректно с новым полем `repo`
+3. Добавить запись в DEVLOG.md
+4. Коммит, push
+5. Отправить `notify.sh done`, закрыть issue
+
+## Краевые случаи
+- Нет — тестовый тикет без кодовых изменений
+
+## Тестирование
+- Сам факт выполнения плана является тестом мульти-репозиторной логики
+- Проверка: уведомления дошли с корректным repo, DEVLOG обновлён, issue закрыт
+
+### Lessons learned (agent-written)
+# Agent Lessons — Issue #167
+
+## Decisions
+- **No code changes**: Test ticket for multi-repo webhook payload verification. Only DEVLOG.md updated.
+- **Referenced commit 6a11387**: Mentioned the specific commit that added `repo` field to webhook payloads to document what was being tested.
+
+## Failed approaches
+- None — straightforward test ticket.
+
+## Errors fixed
+- None — no tests to run (no code changes).
+
+## Developer preferences
+- Developer uses test tickets to verify infrastructure changes (queue system: #164-#166, multi-repo: #167).
+- Same workflow even for no-code tickets: notify → DEVLOG → commit → push → notify done.
+
+## Warnings for next run
+- Remote branch was up to date this time, but always `git pull --rebase` before push (previous runs had CI-generated commits).
+- DEVLOG.md has duplicate #165 entries (pre-existing) — left as-is.
+- Amend commit changes SHA — DEVLOG shows pre-amend SHA (103aac9) while actual commit is 25bacad. Known minor inconsistency in the workflow.
+
+### Diff summary
+```
+ DEVLOG.md | 35 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+```
+
