@@ -11,8 +11,8 @@
 #   CODEX_MAX_SESSIONS   — max session restarts via checkpoint (default: 3)
 #   REPO_CACHE_KEY       — prompt cache key (default: repo:$GITHUB_REPOSITORY:agent:v1)
 #   CODEX_PROFILE        — small|large (default: small)
-#                          small: max_tool_calls=3, fail-fast turn 5
-#                          large: max_tool_calls=6, no fail-fast (session limit only)
+#                          small: max_tool_calls=3, fail-fast turn 5, read_file 15KB
+#                          large: max_tool_calls=6, no fail-fast, read_file 50KB
 #
 # Token optimization:
 #   - reasoning.effort: low by default, auto-escalates to medium on build failure
@@ -22,7 +22,7 @@
 #   - truncation: auto (safety net for long conversations)
 #   - prompt caching: 24h retention for stable system+tools prefix
 #   - Session splitting: 12 turns max, then checkpoint-summary + new session
-#   - Tool output limits: read_file 15KB, run_command 5KB
+#   - Tool output limits: read_file 15KB/50KB (profile), run_command 5KB
 
 set -euo pipefail
 
@@ -77,10 +77,12 @@ HAS_WRITTEN="false"
 # so effective reading budget = FAIL_FAST_TURN - 2
 if [ "$PROFILE" = "large" ]; then
   IMPL_MAX_TOOL_CALLS=6
-  FAIL_FAST_TURN=0   # disabled — session limit (12 turns) is the safety net
+  FAIL_FAST_TURN=0   # disabled — session limit is the safety net
+  READ_FILE_LIMIT=50000   # 50KB — large files like app.js (43KB) fit in one read
 else
   IMPL_MAX_TOOL_CALLS=3
   FAIL_FAST_TURN=5
+  READ_FILE_LIMIT=15000   # 15KB — standard
 fi
 
 echo "Config: model=$MODEL reasoning=$REASONING_EFFORT max_output=$MAX_OUTPUT turns/session=$SESSION_TURNS sessions=$MAX_SESSIONS cache=$CACHE_KEY profile=$PROFILE fail_fast=$FAIL_FAST_TURN" >&2
@@ -122,14 +124,19 @@ The plan already tells you which files to change and what to change. Trust it.
 WORKFLOW:
 1. Read CLAUDE.md ONCE for project conventions (skip if already read in previous session)
 2. If notify.sh exists, run: ./notify.sh progress \"Brief description of your plan\"
-3. Read ONLY the specific file(s) mentioned in the plan (use targeted ranges, not full files)
-4. IMPLEMENT using write_file or run_command with apply_patch/sed
+3. Read the file(s) you need to change using read_file (prefer reading the whole file)
+4. IMPLEMENT the changes:
+   - For small/medium changes: use run_command with apply_patch
+   - For large changes or if apply_patch fails: use write_file with the COMPLETE new file content
+   - Do NOT use python/sed regex scripts — they are fragile and waste turns when they fail
 5. Commit and push: git add -A && git commit -m \"feat: description\" && git push origin \$(git rev-parse --abbrev-ref HEAD)
 6. Call done() with a summary
 
 RULES:
 - DO NOT re-explore the whole codebase — the plan tells you which files to change
-- Your FIRST write_file or apply_patch MUST happen by turn $FAIL_FAST_TURN at the latest — you will be terminated if you only read
+$(if [ "$FAIL_FAST_TURN" -gt 0 ]; then echo "- Your FIRST write_file or apply_patch MUST happen by turn $FAIL_FAST_TURN at the latest — you will be terminated if you only read"; else echo "- Start writing code as soon as you understand the target — do not spend excessive turns reading"; fi)
+- Do NOT create dummy/temporary files — every file you write must be a real code change
+- If apply_patch fails, fall back to write_file with the complete file — do not retry the same patch
 - Make clean, focused changes matching the plan
 - Follow project conventions from CLAUDE.md
 - After pushing, call done() and STOP
@@ -140,7 +147,7 @@ fi
 # Plan mode: all 5 tools, max_tool_calls 6 (exploration needed)
 # Implement mode: 4 tools (no list_files), max_tool_calls profile-dependent
 TOOLS_COMMON='[
-  {"type":"function","name":"read_file","description":"Read contents of a file. Returns up to 15KB. For large files, use run_command with head/tail/sed to read specific sections.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path relative to repo root"}},"required":["path"]}},
+  {"type":"function","name":"read_file","description":"Read contents of a file. Returns up to '"$READ_FILE_LIMIT"' bytes. For very large files, use run_command with head/tail/sed to read specific sections.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path relative to repo root"}},"required":["path"]}},
   {"type":"function","name":"write_file","description":"Write or overwrite a file with the given content. Creates parent directories if needed.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path relative to repo root"},"content":{"type":"string","description":"Full file content"}},"required":["path","content"]}},
   {"type":"function","name":"run_command","description":"Run a shell command. Output truncated to 5KB. Timeout: 60s. For verbose output, pipe through tail -50 or grep.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"}},"required":["command"]}},
   {"type":"function","name":"done","description":"Signal that the task is complete. Call this when finished.","parameters":{"type":"object","properties":{"summary":{"type":"string","description":"Brief summary of what was done"}},"required":["summary"]}}
@@ -171,7 +178,7 @@ execute_tool() {
       local file_path
       file_path=$(echo "$args_json" | jq -r '.path')
       if [ -f "$file_path" ]; then
-        head -c 15000 "$file_path"
+        head -c "$READ_FILE_LIMIT" "$file_path"
       else
         echo "Error: file not found: $file_path"
       fi
