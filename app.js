@@ -183,9 +183,9 @@ function shuffle(arr) {
 // 1. Nothing is on top of it (no tile on a higher layer overlapping it)
 // 2. At least one side (left or right) is open (no adjacent tile on the same layer)
 function isTileFree(tile) {
-    if (tile.removed) return false;
+    if (tile.removed || tile.removing) return false;
 
-    const activeTiles = tiles.filter(t => !t.removed && t !== tile);
+    const activeTiles = tiles.filter(t => !t.removed && !t.removing && t !== tile);
 
     // Check if anything is on top — a tile on a higher layer overlaps if
     // its position is close enough to cover this tile
@@ -528,7 +528,7 @@ function updateTileStates() {
     for (const el of tileEls) {
         const id = parseInt(el.dataset.id, 10);
         const tile = tiles.find(t => t.id === id);
-        if (!tile || tile.removed) continue;
+        if (!tile || tile.removed || tile.removing) continue;
 
         const free = isTileFree(tile);
         el.classList.toggle('free', free);
@@ -539,7 +539,7 @@ function updateTileStates() {
 
 // Handle tile click
 function onTileClick(tile) {
-    if (!gameRunning || tile.removed) return;
+    if (!gameRunning || tile.removed || tile.removing) return;
     if (!isTileFree(tile)) {
         // Shake the blocked tile to indicate it can't be selected.
         // The shake animation runs on .tile-face (inner element) to avoid
@@ -647,10 +647,9 @@ function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, en
 
     function step(now) {
         const tLinear = Math.min((now - startTime) / duration, 1);
-        // Ease-in-out: tiles accelerate away then decelerate into meeting point.
-        const t = tLinear < 0.5
-            ? 2 * tLinear * tLinear
-            : 1 - 2 * (1 - tLinear) * (1 - tLinear);
+        // Ease-out-in: fast launch, slow at mid-arc, fast finish.
+        const sway = 0.12;
+        const t = Math.min(1, Math.max(0, tLinear + sway * Math.sin(Math.PI * 2 * tLinear)));
         // Cubic Bezier: B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
         const inv = 1 - t;
         const inv2 = inv * inv;
@@ -738,15 +737,19 @@ function clampCtrlPairSymmetric(x1, y1, ref1X, ref1Y, x2, y2, ref2X, ref2Y, boar
 
 // Remove a matched pair with fly-together arc animation
 function removePair(a, b) {
-    a.removed = true;
-    b.removed = true;
-    moves++;
-    score += 150;
+    a.removing = true;
+    b.removing = true;
 
     const elA = boardEl.querySelector(`[data-id="${a.id}"]`);
     const elB = boardEl.querySelector(`[data-id="${b.id}"]`);
 
     if (!elA || !elB) {
+        a.removing = false;
+        b.removing = false;
+        a.removed = true;
+        b.removed = true;
+        moves++;
+        score += 150;
         updateUI();
         updateTileStates();
         applyZoom();
@@ -800,7 +803,9 @@ function removePair(a, b) {
 
     // Scatter distance: how far each tile flies outward from start
     const safeDist = Math.max(dist, tileW);
-    const scatterDist = Math.max(tileW * 3.0, safeDist * 1.5);
+    const boardSpan = Math.min(boardW, boardH);
+    const maxScatter = boardSpan * 0.45;
+    const scatterDist = Math.min(Math.max(tileW * 3.4, safeDist * 1.7), maxScatter);
 
     // Build control points: scatter (ctrl1) then converge (ctrl2)
     let ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By;
@@ -813,7 +818,7 @@ function removePair(a, b) {
     // Clamp control points to board bounds, preserving symmetry
     // Small padding allows scatter points to extend slightly beyond board edges
     // but not far enough to cause viewport scrolling on mobile
-    const pad = tileW * 0.5;
+    const pad = Math.min(boardSpan * 0.1, tileW * 1.2);
     [ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By] = clampCtrlPairSymmetric(
         ctrl1Ax, ctrl1Ay, aCx - tileW / 2, aCy - tileH / 2,
         ctrl1Bx, ctrl1By, bCx - tileW / 2, bCy - tileH / 2,
@@ -826,7 +831,7 @@ function removePair(a, b) {
     );
 
     // Duration scales with distance for smooth arc animation
-    const duration = Math.round(Math.min(700, Math.max(400, 300 + dist * 0.5)));
+    const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
     let finished = 0;
 
     function onFinish() {
@@ -836,6 +841,14 @@ function removePair(a, b) {
             // Remove tiles from DOM immediately (no fade-out)
             if (elA && elA.parentNode) elA.remove();
             if (elB && elB.parentNode) elB.remove();
+            a.removing = false;
+            b.removing = false;
+            a.removed = true;
+            b.removed = true;
+            moves++;
+            score += 150;
+            updateUI();
+            updateTileStates();
             applyZoom();
             checkGameState();
         }
@@ -849,7 +862,6 @@ function removePair(a, b) {
     // become available (clickable) at the start of the fly animation,
     // not after it finishes
     updateTileStates();
-    updateUI();
 
     animateArc(elA, ax, ay, ctrl1Ax, ctrl1Ay, ctrl2Ax, ctrl2Ay, endAx, endAy, duration, onFinish);
     animateArc(elB, bx, by, ctrl1Bx, ctrl1By, ctrl2Bx, ctrl2By, endBx, endBy, duration, onFinish);
@@ -1010,7 +1022,7 @@ function generateSolvableShuffleLayout(positions, faces) {
 let shuffleInProgress = false;
 
 function shuffleTiles() {
-    if (!gameRunning || shuffleInProgress) return;
+    if (!gameRunning || shuffleInProgress || tiles.some(t => t.removing)) return;
     shuffleInProgress = true;
 
     clearHints();
