@@ -453,6 +453,19 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
 
         RESULT=$(execute_tool "$FUNC_NAME" "$ARGS")
 
+        # Track writes in main shell (execute_tool runs in subshell via $(...),
+        # so HAS_WRITTEN set inside it is lost). Check based on tool name + args.
+        if [ "$HAS_WRITTEN" = "false" ]; then
+          if [ "$FUNC_NAME" = "write_file" ]; then
+            HAS_WRITTEN="true"
+          elif [ "$FUNC_NAME" = "run_command" ]; then
+            CMD_CHECK=$(echo "$ARGS" | jq -r '.command' 2>/dev/null || echo "")
+            if echo "$CMD_CHECK" | grep -qE 'sed -i|patch|apply_patch|tee |git (add|commit|push)'; then
+              HAS_WRITTEN="true"
+            fi
+          fi
+        fi
+
         # If done() appears together with other tool calls (parallel mode),
         # process all tools first, then exit once the loop finishes.
         if [ "$FUNC_NAME" = "done" ]; then
