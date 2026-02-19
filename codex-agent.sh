@@ -130,7 +130,8 @@ WORKFLOW:
    - For large changes or if apply_patch fails: use write_file with the COMPLETE new file content
    - Do NOT use python/sed regex scripts — they are fragile and waste turns when they fail
 5. Commit and push: git add -A && git commit -m \"feat: description\" && git push origin \$(git rev-parse --abbrev-ref HEAD)
-6. Call done() with a summary
+6. Write lessons to /tmp/agent-lessons.md: decisions made, failed approaches, errors fixed, warnings for next run (5-15 lines)
+7. Call done() with a summary
 
 RULES:
 - DO NOT re-explore the whole codebase — the plan tells you which files to change
