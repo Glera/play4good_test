@@ -779,7 +779,7 @@ function removePair(a, b) {
     const maxAmplitude = boardSpan * 0.35;
     const absDy = Math.abs(dy);
     const closeness = Math.max(0, 1 - dist / (tileW * 6));
-    const baseAmplitude = Math.min(Math.max(tileW * 3.0, absDy * 0.3), maxAmplitude);
+    const baseAmplitude = Math.min(Math.max(tileW * 2.0, absDy * 0.3), maxAmplitude);
     const boost = 1 + closeness * 1.5;
     const amplitude = Math.min(baseAmplitude * boost, maxAmplitude);
 
