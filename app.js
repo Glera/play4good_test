@@ -638,46 +638,49 @@ function createParticles(x, y) {
 }
 
 // Animate a tile along a parametric egg-curve arc using CSS transforms (GPU-accelerated)
-// Lateral displacement follows sin(πt) — smooth scatter outward and return
+// Phase 1 (~0-30%): tiles scatter laterally while barely moving forward
+// Phase 2 (~30-100%): tiles rush toward meeting point as lateral fades to zero
 // amplitude: peak lateral offset (positive = +perp direction, negative = -perp)
 // perpX/perpY: unit perpendicular vector to the A→B axis
-// onContact: called once at ~95% progress (early removal point)
+// onContact: called once at ~92% progress (early removal point)
 function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, duration, onContact) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
     el.style.zIndex = 10000;
     el.style.willChange = 'transform';
     let contactFired = false;
-    const tContact = 0.95;
+    const tContact = 0.92;
 
     function step(now) {
-        const tLinear = Math.min((now - startTime) / duration, 1);
-        // Smoothstep easing with linear mix to prevent mid-arc stalling
-        const ss = tLinear * tLinear * (3 - 2 * tLinear);
-        const t = ss * 0.92 + tLinear * 0.08;
+        const t = Math.min((now - startTime) / duration, 1);
 
-        // Longitudinal: linear interpolation start → end
-        const longX = startX + (endX - startX) * t;
-        const longY = startY + (endY - startY) * t;
+        // Longitudinal: cubic ease-in — tiles linger near start, then accelerate to end
+        // At t=0.3 only 2.7% forward; at t=0.7 already 34%; at t=0.9 → 73%
+        const tLong = t * t * t;
 
-        // Lateral: egg-curve via sin(πt) — smooth scatter and return
-        const lateral = Math.sin(Math.PI * t) * amplitude;
-        const x = longX + perpX * lateral;
-        const y = longY + perpY * lateral;
+        // Lateral: asymmetric bell curve peaking at ~20% of animation
+        // sqrt(t) * (1-t)^2 normalized to peak=1.0 (normalization factor ≈ 3.5)
+        const tLat = Math.sqrt(t) * (1 - t) * (1 - t) * 3.5;
 
-        el.style.transform = `translate3d(${x - startX}px, ${y - startY}px, 0)`;
+        // Position: start + forward progress + lateral scatter
+        const x = startX + (endX - startX) * tLong + perpX * amplitude * tLat;
+        const y = startY + (endY - startY) * tLong + perpY * amplitude * tLat;
 
-        // Fire contact callback once when nearing destination (t threshold guards frame skipping)
-        if (!contactFired && tLinear >= tContact) {
+        // Slight scale-down as tiles approach impact point
+        const scale = 1 - 0.1 * t * t;
+
+        el.style.transform = `translate3d(${x - startX}px, ${y - startY}px, 0) scale(${scale})`;
+
+        // Fire contact callback once when nearing destination
+        if (!contactFired && t >= tContact) {
             contactFired = true;
             if (onContact) onContact();
         }
 
-        if (tLinear < 1) {
+        if (t < 1) {
             requestAnimationFrame(step);
         } else {
             el.style.willChange = '';
-            // Ensure contact fires even if we jumped past tContact in one frame
             if (!contactFired) {
                 contactFired = true;
                 if (onContact) onContact();
@@ -752,10 +755,10 @@ function removePair(a, b) {
     // Direction & perpendicular vectors (with explicit guard for coincident tiles)
     const { nx, ny, perpX, perpY } = calcDirection(dx, dy, dist);
 
-    // End positions: tiles meet with their bounds just touching along the A→B axis
-    // Compute the half-extent of a tile in the movement direction.
+    // End positions: tiles converge to near the meeting point
+    // halfExtent keeps a small gap so tiles don't fully overlap before particles fire
     const halfExtent = (Math.abs(nx) * tileW + Math.abs(ny) * tileH) / 2;
-    const contactDist = Math.max(halfExtent * 0.98, dist / 2);
+    const contactDist = halfExtent * 0.4;
     const endAx = meetX - nx * contactDist - tileW / 2;
     const endAy = meetY - ny * contactDist - tileH / 2;
     const endBx = meetX + nx * contactDist - tileW / 2;
@@ -765,16 +768,16 @@ function removePair(a, b) {
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Egg-curve amplitude: lateral scatter distance (3.5× tileW, clamped to 40% of board)
+    // Egg-curve amplitude: lateral scatter distance (1.8× tileW, clamped to 25% of board)
     const boardSpan = Math.min(boardW, boardH);
-    const maxAmplitude = boardSpan * 0.4;
-    const amplitude = Math.min(tileW * 3.5, maxAmplitude);
+    const maxAmplitude = boardSpan * 0.25;
+    const amplitude = Math.min(tileW * 1.8, maxAmplitude);
 
     // Duration scales with distance for smooth arc animation
     const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
     let contactCount = 0;
 
-    // onContact fires at ~95% progress for each tile (early removal)
+    // onContact fires at ~92% progress for each tile (early removal)
     // Both must fire before actual removal — shared counter guards synchronicity
     function onContact() {
         contactCount++;
