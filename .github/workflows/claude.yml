@@ -52,8 +52,9 @@ jobs:
             core.setOutput('multi_agent', labels.includes('ci:multi-agent') ? 'true' : 'false');
             core.setOutput('testing', labels.includes('ci:testing') ? 'true' : 'false');
             core.setOutput('approve', labels.includes('ci:approve') ? 'true' : 'false');
+            core.setOutput('codex_impl', labels.includes('ci:codex-impl') ? 'true' : 'false');
 
-            console.log(`CI options: multi_agent=${labels.includes('ci:multi-agent')}, testing=${labels.includes('ci:testing')}, approve=${labels.includes('ci:approve')}`);
+            console.log(`CI options: multi_agent=${labels.includes('ci:multi-agent')}, testing=${labels.includes('ci:testing')}, approve=${labels.includes('ci:approve')}, codex_impl=${labels.includes('ci:codex-impl')}`);
 
       - uses: actions/checkout@v4
         with:
@@ -106,6 +107,11 @@ jobs:
             sed -i 's/\r$//' ./codex-review.sh
             chmod +x ./codex-review.sh
           fi
+          # codex-agent.sh
+          if [ -f "./codex-agent.sh" ]; then
+            sed -i 's/\r$//' ./codex-agent.sh
+            chmod +x ./codex-agent.sh
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -129,7 +135,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\",\"options\":{\"multi_agent\":\"${{ steps.dev.outputs.multi_agent }}\",\"testing\":\"${{ steps.dev.outputs.testing }}\",\"approve\":\"${{ steps.dev.outputs.approve }}\"}}"
+            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\",\"options\":{\"multi_agent\":\"${{ steps.dev.outputs.multi_agent }}\",\"testing\":\"${{ steps.dev.outputs.testing }}\",\"approve\":\"${{ steps.dev.outputs.approve }}\",\"codex_impl\":\"${{ steps.dev.outputs.codex_impl }}\"}}"
 
       # ============================================================
       # PHASE 1: PLAN (Claude writes a plan)
@@ -143,8 +149,9 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Планирование\",\"phase_num\":\"1\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
-      - name: "Phase 1: Plan"
+      - name: "Phase 1: Plan (Opus)"
         id: plan
+        if: steps.dev.outputs.codex_impl != 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -185,7 +192,7 @@ jobs:
           sed -i "s|ISSUE_PLACEHOLDER|$ISSUE_NUM|g" /tmp/plan-prompt.txt
           sed -i "s|TITLE_PLACEHOLDER|$ISSUE_TITLE|g" /tmp/plan-prompt.txt
 
-          echo "=== Phase 1: Planning ==="
+          echo "=== Phase 1: Planning (Opus) ==="
           claude -p --dangerously-skip-permissions \
             --model claude-opus-4-6 \
             --max-turns 15 \
@@ -200,8 +207,47 @@ jobs:
           else
             echo "PLAN_CREATED=false" >> "$GITHUB_ENV"
             echo "Plan file not created — extracting from output"
-            # Try to create a minimal plan from Claude's output
             echo "Auto-extracted plan from Claude output" > /tmp/plan.md
+            tail -50 /tmp/phase1-output.txt >> /tmp/plan.md
+          fi
+
+      - name: "Phase 1: Plan (Codex)"
+        id: plan_codex
+        if: steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          BRANCH=$(git branch --show-current)
+
+          cat > /tmp/plan-context.txt << CONTEXT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          TASK: Create a detailed implementation plan for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
+
+          Read the issue body from GitHub:
+          $(cat /dev/stdin <<< "$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/issues/${ISSUE_NUM}" | jq -r '.body // ""')")
+
+          Start by reading CLAUDE.md, then explore the codebase.
+          Write the plan to /tmp/plan.md.
+          CONTEXT_EOF
+
+          echo "=== Phase 1: Planning (Codex) ==="
+          ./codex-agent.sh plan /tmp/plan-context.txt 2>&1 | tee /tmp/phase1-output.txt
+
+          if [ -f /tmp/plan.md ]; then
+            echo "PLAN_CREATED=true" >> "$GITHUB_ENV"
+            echo "=== Plan contents ==="
+            cat /tmp/plan.md
+          else
+            echo "PLAN_CREATED=false" >> "$GITHUB_ENV"
+            echo "Plan file not created"
+            echo "Auto-extracted plan from Codex output" > /tmp/plan.md
             tail -50 /tmp/phase1-output.txt >> /tmp/plan.md
           fi
 
@@ -225,13 +271,15 @@ jobs:
         if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
+          REVIEWER="Codex"
+          [ "${{ steps.dev.outputs.codex_impl }}" = "true" ] && REVIEWER="Opus"
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Codex ревью\",\"phase_num\":\"2\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"${REVIEWER} ревью\",\"phase_num\":\"2\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 2: Codex plan review"
         id: codex_plan
-        if: steps.dev.outputs.multi_agent == 'true'
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.codex_impl != 'true'
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -241,22 +289,61 @@ jobs:
         run: |
           if [ ! -f /tmp/plan.md ]; then
             echo "No plan to review — skipping"
-            echo "CODEX_REVIEW=" >> "$GITHUB_ENV"
             exit 0
           fi
 
           echo "=== Phase 2: Codex reviewing plan ==="
           REVIEW=$(./codex-review.sh plan /tmp/plan.md 2>/dev/null || echo "Codex review unavailable")
           echo "$REVIEW" > /tmp/codex-plan-review.txt
-          echo "CODEX_PLAN_REVIEW<<REVIEW_EOF" >> "$GITHUB_ENV"
-          echo "$REVIEW" >> "$GITHUB_ENV"
-          echo "REVIEW_EOF" >> "$GITHUB_ENV"
 
           echo "=== Codex review ==="
           echo "$REVIEW"
 
-      # --- Notify: Codex plan review ---
-      - name: "Notify: Phase 2 — Codex plan review"
+      - name: "Phase 2: Opus plan review (Codex implementer)"
+        id: opus_plan_review
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+        run: |
+          if [ ! -f /tmp/plan.md ]; then
+            echo "No plan to review — skipping"
+            exit 0
+          fi
+
+          PLAN=$(cat /tmp/plan.md)
+
+          cat > /tmp/opus-plan-review-prompt.txt << REVIEW_PROMPT_EOF
+          You are a senior code reviewer. Review this implementation plan.
+
+          Give brief, specific feedback (3-5 points):
+          - Completeness (all files accounted for?)
+          - Potential problems and edge cases
+          - Missing steps
+          - Regression risks
+
+          If the plan looks good, say 'Plan looks good' and note 1-2 things to watch.
+          Keep your response under 15 lines.
+
+          PLAN:
+          ${PLAN}
+          REVIEW_PROMPT_EOF
+
+          echo "=== Phase 2: Opus reviewing Codex plan ==="
+          REVIEW=$(claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --max-turns 3 \
+            "$(cat /tmp/opus-plan-review-prompt.txt)" 2>/dev/null || echo "Opus review unavailable")
+
+          echo "$REVIEW" > /tmp/codex-plan-review.txt
+          echo "=== Opus review ==="
+          echo "$REVIEW"
+
+      # --- Notify: Plan review ---
+      - name: "Notify: Phase 2 — Plan review"
         if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
@@ -264,11 +351,14 @@ jobs:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
         run: |
+          REVIEWER="Codex"
+          [ "${{ steps.dev.outputs.codex_impl }}" = "true" ] && REVIEWER="Opus"
+
           if [ -f /tmp/codex-plan-review.txt ]; then
             REVIEW=$(head -30 /tmp/codex-plan-review.txt)
-            ./notify.sh codex_review "Phase 2 — Codex ревью плана:\n\n$REVIEW"
+            ./notify.sh codex_review "Phase 2 — ${REVIEWER} ревью плана:\n\n$REVIEW"
           else
-            ./notify.sh info "Phase 2 — Codex ревью пропущено (нет плана)"
+            ./notify.sh info "Phase 2 — ${REVIEWER} ревью пропущено (нет плана)"
           fi
 
       # ============================================================
@@ -411,8 +501,9 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Реализация\",\"phase_num\":\"3\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
-      - name: "Phase 3: Implement"
+      - name: "Phase 3: Implement (Opus)"
         id: implement
+        if: steps.dev.outputs.codex_impl != 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -443,13 +534,13 @@ jobs:
           YOUR PLAN (from Phase 1):
           ${PLAN}
 
-          CODEX REVIEWER FEEDBACK (address any concerns):
+          REVIEWER FEEDBACK (address any concerns):
           ${REVIEW}
 
           WORKFLOW:
           1. Read CLAUDE.md for project rules
           2. Implement the changes according to the plan
-          3. Address the Codex reviewer's feedback
+          3. Address the reviewer's feedback
           4. ./notify.sh progress "Brief description of what was done"
           5. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
           6. git push origin ${BRANCH}
@@ -461,7 +552,7 @@ jobs:
           - Once pushed, STOP — do not loop
           PROMPT_EOF
 
-          echo "=== Phase 3: Implementing ==="
+          echo "=== Phase 3: Implementing (Opus) ==="
           set +e
           claude -p --dangerously-skip-permissions \
             --model claude-opus-4-6 \
@@ -476,10 +567,10 @@ jobs:
           fi
           exit $EXIT_CODE
 
-      # Continue implementation if hit max turns
+      # Continue Opus implementation if hit max turns
       - name: "Phase 3: Implement continue (+30)"
         id: impl_cont
-        if: steps.implement.outcome == 'failure' && env.IMPL_MAX_TURNS == 'true'
+        if: steps.dev.outputs.codex_impl != 'true' && steps.implement.outcome == 'failure' && env.IMPL_MAX_TURNS == 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -494,6 +585,54 @@ jobs:
             --continue \
             --max-turns 30 \
             --verbose
+
+      - name: "Phase 3: Implement (Codex)"
+        id: implement_codex
+        if: steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          MAX_CODEX_TURNS: "40"
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          BRANCH=$(git branch --show-current)
+
+          PLAN=""
+          if [ -f /tmp/plan.md ]; then
+            PLAN=$(cat /tmp/plan.md)
+          fi
+
+          REVIEW=""
+          if [ -f /tmp/codex-plan-review.txt ]; then
+            REVIEW=$(cat /tmp/codex-plan-review.txt)
+          fi
+
+          cat > /tmp/impl-context.txt << CONTEXT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
+
+          YOUR PLAN (from Phase 1):
+          ${PLAN}
+
+          REVIEWER FEEDBACK (address any concerns):
+          ${REVIEW}
+
+          After implementing:
+          1. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
+          2. git push origin ${BRANCH}
+          3. Call done()
+
+          Stay on branch ${BRANCH}. Follow project conventions from CLAUDE.md.
+          CONTEXT_EOF
+
+          echo "=== Phase 3: Implementing (Codex) ==="
+          ./codex-agent.sh implement /tmp/impl-context.txt 2>&1 | tee /tmp/phase3-output.txt
 
       # --- Notify: Phase 3 result ---
       - name: "Notify: Phase 3 — Implementation"
@@ -521,13 +660,15 @@ jobs:
         if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.branch != ''
         continue-on-error: true
         run: |
+          REVIEWER="Codex"
+          [ "${{ steps.dev.outputs.codex_impl }}" = "true" ] && REVIEWER="Opus"
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Код ревью\",\"phase_num\":\"4\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"${REVIEWER} код ревью\",\"phase_num\":\"4\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 4: Codex code review"
         id: codex_code
-        if: steps.dev.outputs.multi_agent == 'true'
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.codex_impl != 'true'
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -551,15 +692,67 @@ jobs:
           echo "=== Codex code review ==="
           echo "$REVIEW"
 
-          # Check if review found issues
           if echo "$REVIEW" | grep -qi "выглядит хорошо\|looks good\|no issues"; then
             echo "CODE_REVIEW_OK=true" >> "$GITHUB_ENV"
           else
             echo "CODE_REVIEW_OK=false" >> "$GITHUB_ENV"
           fi
 
-      # --- Notify: Codex code review ---
-      - name: "Notify: Phase 4 — Codex code review"
+      - name: "Phase 4: Opus code review (Codex implementer)"
+        id: opus_code_review
+        if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" = "$INITIAL_SHA" ]; then
+            echo "No changes to review — skipping"
+            echo "CODE_REVIEW_OK=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "=== Phase 4: Opus reviewing Codex code ==="
+          git diff "$INITIAL_SHA"..HEAD > /tmp/changes.diff
+          DIFF_CONTENT=$(head -c 30000 /tmp/changes.diff)
+
+          cat > /tmp/opus-code-review-prompt.txt << CODE_REVIEW_EOF
+          You are a senior code reviewer. Review this git diff.
+
+          Give brief, specific feedback (3-5 points):
+          - Bugs and logic errors
+          - Missing edge cases
+          - Style issues
+          - Regression risks
+
+          If the code looks good, say 'Code looks good' and note 1-2 things to watch.
+          Keep your response under 15 lines.
+
+          DIFF:
+          ${DIFF_CONTENT}
+          CODE_REVIEW_EOF
+
+          REVIEW=$(claude -p --dangerously-skip-permissions \
+            --model claude-opus-4-6 \
+            --max-turns 3 \
+            "$(cat /tmp/opus-code-review-prompt.txt)" 2>/dev/null || echo "Opus review unavailable")
+
+          echo "$REVIEW" > /tmp/codex-code-review.txt
+
+          echo "=== Opus code review ==="
+          echo "$REVIEW"
+
+          if echo "$REVIEW" | grep -qi "looks good\|выглядит хорошо\|no issues"; then
+            echo "CODE_REVIEW_OK=true" >> "$GITHUB_ENV"
+          else
+            echo "CODE_REVIEW_OK=false" >> "$GITHUB_ENV"
+          fi
+
+      # --- Notify: Code review ---
+      - name: "Notify: Phase 4 — Code review"
         if: steps.dev.outputs.multi_agent == 'true' && steps.dev.outputs.approve == 'true'
         continue-on-error: true
         env:
@@ -567,21 +760,24 @@ jobs:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
         run: |
+          REVIEWER="Codex"
+          [ "${{ steps.dev.outputs.codex_impl }}" = "true" ] && REVIEWER="Opus"
+
           if [ -f /tmp/codex-code-review.txt ]; then
             REVIEW=$(head -30 /tmp/codex-code-review.txt)
             if [ "$CODE_REVIEW_OK" = "true" ]; then
-              ./notify.sh codex_review "Phase 4 — Codex: код ОК\n\n$REVIEW"
+              ./notify.sh codex_review "Phase 4 — ${REVIEWER}: код ОК\n\n$REVIEW"
             else
-              ./notify.sh codex_review "Phase 4 — Codex нашёл замечания:\n\n$REVIEW"
+              ./notify.sh codex_review "Phase 4 — ${REVIEWER} нашёл замечания:\n\n$REVIEW"
             fi
           else
-            ./notify.sh info "Phase 4 — Codex ревью пропущено (нет изменений)"
+            ./notify.sh info "Phase 4 — ${REVIEWER} ревью пропущено (нет изменений)"
           fi
 
-      # Fix issues found by code review (one pass)
-      - name: "Phase 4: Fix review issues"
+      # Fix issues found by code review (one pass) — Opus fixes
+      - name: "Phase 4: Fix review issues (Opus)"
         id: fix_review
-        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false'
+        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false' && steps.dev.outputs.codex_impl != 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -601,7 +797,7 @@ jobs:
           cat > /tmp/fix-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
-          A code reviewer (Codex) found issues with your implementation for Issue #${ISSUE_NUM}.
+          A code reviewer found issues with your implementation for Issue #${ISSUE_NUM}.
 
           REVIEW FEEDBACK:
           ${REVIEW}
@@ -614,12 +810,50 @@ jobs:
           5. Once pushed, STOP
           PROMPT_EOF
 
-          echo "=== Phase 4: Fixing review issues ==="
+          echo "=== Phase 4: Fixing review issues (Opus) ==="
           claude -p --dangerously-skip-permissions \
             --model claude-opus-4-6 \
             --max-turns 20 \
             --verbose \
             "$(cat /tmp/fix-prompt.txt)"
+
+      # Fix issues found by code review (one pass) — Codex fixes
+      - name: "Phase 4: Fix review issues (Codex)"
+        id: fix_review_codex
+        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false' && steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          MAX_CODEX_TURNS: "20"
+        run: |
+          BRANCH=$(git branch --show-current)
+          ISSUE_NUM="${{ github.event.issue.number }}"
+
+          REVIEW=""
+          if [ -f /tmp/codex-code-review.txt ]; then
+            REVIEW=$(cat /tmp/codex-code-review.txt)
+          fi
+
+          cat > /tmp/fix-context.txt << CONTEXT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          A code reviewer (Opus) found issues with your implementation for Issue #${ISSUE_NUM}.
+
+          REVIEW FEEDBACK:
+          ${REVIEW}
+
+          Fix the issues, then:
+          1. git add -A && git commit -m "fix: address code review feedback (#${ISSUE_NUM})"
+          2. git push origin ${BRANCH}
+          3. Call done()
+          CONTEXT_EOF
+
+          echo "=== Phase 4: Fixing review issues (Codex) ==="
+          ./codex-agent.sh implement /tmp/fix-context.txt
 
       # --- Notify: Phase 4 fix result ---
       - name: "Notify: Phase 4 — Fix applied"
@@ -630,10 +864,16 @@ jobs:
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
         run: |
-          if [ "${{ steps.fix_review.outcome }}" = "success" ]; then
-            ./notify.sh progress "Phase 4 — Claude исправил замечания Codex"
+          FIX_OUTCOME="${{ steps.fix_review.outcome || steps.fix_review_codex.outcome }}"
+          IMPL_MODEL="Claude"
+          [ "${{ steps.dev.outputs.codex_impl }}" = "true" ] && IMPL_MODEL="Codex"
+          REVIEWER="Codex"
+          [ "${{ steps.dev.outputs.codex_impl }}" = "true" ] && REVIEWER="Opus"
+
+          if [ "$FIX_OUTCOME" = "success" ]; then
+            ./notify.sh progress "Phase 4 — ${IMPL_MODEL} исправил замечания ${REVIEWER}"
           else
-            ./notify.sh error "Phase 4 — Claude не смог исправить замечания"
+            ./notify.sh error "Phase 4 — ${IMPL_MODEL} не смог исправить замечания"
           fi
 
       # ============================================================
