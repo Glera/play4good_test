@@ -233,15 +233,30 @@ while [ $TURN -lt "$MAX_TURNS" ]; do
       '{model: "gpt-5.2-codex", input: $input, tools: $tools, store: true, previous_response_id: $prev_id}')
   fi
 
-  # Call Codex API (Responses endpoint)
-  HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
-    https://api.openai.com/v1/responses \
-    -H "Authorization: Bearer $OPENAI_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d "$REQUEST_BODY")
+  # Call Codex API (Responses endpoint) with retry on 429
+  RETRY=0
+  MAX_RETRIES=3
+  while true; do
+    HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
+      https://api.openai.com/v1/responses \
+      -H "Authorization: Bearer $OPENAI_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d "$REQUEST_BODY")
 
-  HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
-  BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+    HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
+    BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+    if [ "$HTTP_CODE" = "429" ] && [ $RETRY -lt $MAX_RETRIES ]; then
+      RETRY=$((RETRY + 1))
+      WAIT=$(echo "$BODY" | jq -r '.error.message' 2>/dev/null | grep -oP 'in \K[0-9.]+' || echo "10")
+      WAIT_INT=$(printf "%.0f" "$WAIT" 2>/dev/null || echo "10")
+      [ "$WAIT_INT" -lt 5 ] && WAIT_INT=5
+      echo "  Rate limited — waiting ${WAIT_INT}s (retry $RETRY/$MAX_RETRIES)" >&2
+      sleep "$WAIT_INT"
+      continue
+    fi
+    break
+  done
 
   if [ "$HTTP_CODE" != "200" ]; then
     echo "Codex API error (HTTP $HTTP_CODE)" >&2
