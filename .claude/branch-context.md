@@ -197,3 +197,108 @@ Performance tests: PASSED
  2 files changed, 40 insertions(+), 3 deletions(-)
 ```
 
+
+---
+
+## #160 — чуть чуть перелет в анимации уборки костей, успеваю заметить наслоение, нужно по (2026-02-19)
+Commit: 72f504c
+Files: .github/workflows/claude.yml,app.js
+
+### Plan
+# Plan: Issue #160 — Убрать наслоение костей при анимации удаления
+
+## Проблема
+В `animateArc()` кости удаляются при `tContact = 0.98` (98% прогресса анимации). Но конечные позиции костей сильно перекрываются: `sideGap = tileW * 0.15` → центры костей в конце разнесены всего на `tileW * 0.3`, что даёт перекрытие ~70% ширины кости. Визуальный контакт (касание рёбер) наступает уже при `t ≈ 0.85`, и пользователь видит наслоение костей в течение ~13% длительности анимации (65-117мс) — заметно.
+
+## Решение — два изменения в `app.js`
+
+### 1. Увеличить `sideGap` (строка 758)
+```js
+// Было:
+const sideGap = Math.min(tileW * 0.15, dist * 0.4);
+// Станет:
+const sideGap = Math.min(tileW * 0.45, dist * 0.4);
+```
+С `tileW * 0.45` центры в конце разнесены на `tileW * 0.9`. С учётом scale-down (scale=0.92 при t=1) видимая ширина кости = `tileW * 0.92`. Зазор между рёбрами: `tileW * 0.9 - tileW * 0.92 ≈ 0` — кости встречаются почти ребро к ребру, без наслоения.
+
+### 2. Понизить `tContact` (строка 650)
+```js
+// Было:
+const tContact = 0.98;
+// Станет:
+const tContact = 0.93;
+```
+С новым sideGap кости приближаются к контакту при `t ≈ 0.95`. Удаление при `t = 0.93` создаёт эффект "исчезновения в момент касания" — кости ещё на расстоянии ~2-3px друг от друга, что визуально неотличимо от контакта.
+
+## Краевые случаи
+- **Близкие кости (стопка, dist ≈ 0):** cap `dist * 0.4` делает sideGap ≈ 0, кости перекроются в конце → но удаление при t=0.93 скрывает это
+- **Далёкие кости:** sideGap = tileW * 0.45 → ребро к ребру → чистый контакт
+- **Маленький экран (320px):** tileW ~30px → sideGap = 13.5px, пропорционально масштабируется
+- **Scale-down:** при t=0.93 scale = 1 - 0.08 * 0.86 = 0.931 → кость на 7% уже, добавляет визуальный зазор
+
+## Файлы
+- `app.js` — строки 650 и 758 (два числовых значения)
+
+## Тестирование
+- `npx playwright test` — smoke + performance тесты
+- Визуальная проверка: удалить пары на разных расстояниях, убедиться что нет видимого наслоения
+- Проверить на 320px и 1024px
+
+### Review feedback
+Plan review:
+- План покрывает только app.js; стоит проверить, не используются ли эти константы ещё где-то (например, в расчётах коллизий/hitbox), чтобы не было рассинхрона.  
+- Потенциальный edge case: при малых dist (стопки) sideGap=0 и tContact=0.93 — кости могут всё же заметно перекрываться до удаления; возможно нужно условие для таких случаев.  
+- tContact подобран «вручную»; лучше вывести из геометрии (ширина/scale/sideGap), иначе риск регрессий при будущих изменениях scale.  
+- Риск регрессии: увеличенный sideGap может сместить кости к краям и вызвать выход за пределы контейнера на маленьких экранах — проверьте 320px с safe area.  
+
+В остальном план ок, но обратите внимание на визуальный зазор (может быть заметен на маленьких тайлах).
+
+Code review (false):
+1) `animateArc` поменял дефолт `tContact` с 0.98 на 0.93. Если есть другие вызовы `animateArc` (не из `removePair`), поведение изменится незаметно и может вызвать раннее удаление/мигание — проверьте остальные вызовы.  
+2) Расчёт `tContact` основан на `endScale` при `t=
+
+### Corrections after review
+Fix agent messages: 
+Commits after review: 1cce38a docs: update DEVLOG for #160
+72f504c fix: address code review feedback (#160)
+71bede0 feat: убрать наслоение костей при анимации удаления (#160)
+5f1020a fix: safe branch-context injection + increase limit to 200KB
+
+### Lessons learned (agent-written)
+# Agent Lessons — Issue #160
+
+## Decisions
+- **sideGap 0.15 → 0.45**: Increased so tile centers at endpoint are separated by 0.9*tileW — nearly edge-to-edge with scale=0.92. Original 0.15 gave only 0.3*tileW separation causing ~70% overlap.
+- **tContact computed from geometry, not hardcoded**: Reviewer flagged risk of regression if scale changes. Formula: `endGap = 2*sideGap - tileW*(1-0.08)`, then `tContact = max(0.90, 0.98 + endGap/tileW)`. For typical sideGap=0.45: tContact≈0.96. For stacked tiles (sideGap≈0): tContact=0.90.
+- **animateArc accepts tContact as parameter**: Instead of internal constant, tContact is passed from removePair where geometry is known. Default 0.93 if called without it.
+- **Did NOT add minimum sideGap for stacked tiles**: Reviewer concern valid but stacked tiles already overlap from start — early removal at t=0.90 + lateral arc separation makes it acceptable.
+
+## Failed approaches
+- None — straightforward implementation.
+
+## Errors fixed
+- None — all 30 tests passed first run.
+
+## Developer preferences
+- Same workflow: notify → implement → test → commit → DEVLOG → amend → push
+- DEVLOG entries newest first, after `# Development Log` header
+
+## Warnings for next run
+- Remote branch may have CI commits — always `git pull --rebase` before push (happened again this run).
+- `dist * 0.4` cap on sideGap means close tiles get smaller sideGap — tContact formula compensates by firing earlier.
+- Scale formula `1 - 0.08*t*t` is duplicated between animateArc (computation) and removePair (endScale constant) — if scale changes, update both.
+
+### Test results
+```
+Smoke tests: PASSED
+Performance tests: PASSED
+```
+
+### Diff summary
+```
+ .github/workflows/claude.yml | 72 +++++++++++++++++++++++++-------------------
+ DEVLOG.md                    | 37 +++++++++++++++++++++++
+ app.js                       | 21 +++++++++----
+ 3 files changed, 93 insertions(+), 37 deletions(-)
+```
+
