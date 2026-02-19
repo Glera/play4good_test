@@ -87,6 +87,29 @@ jobs:
       - name: Save initial commit SHA
         run: echo "INITIAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
+      # ============================================================
+      # BRANCH CONTEXT: Persistent memory across CI runs
+      # ============================================================
+
+      - name: Load branch context
+        run: |
+          # Load persistent branch context (previous runs, decisions, preferences)
+          # This is the CI equivalent of IDE chat history
+          if [ -f ".claude/branch-context.md" ]; then
+            echo "Branch context loaded ($(wc -c < .claude/branch-context.md) bytes)"
+
+            # Build formatted section for agent prompts
+            {
+              echo "BRANCH CONTEXT (previous work on this branch — decisions, patterns, and lessons learned."
+              echo "Use this to avoid repeating failed approaches and respect developer preferences):"
+              echo ""
+              cat .claude/branch-context.md
+            } > /tmp/branch-context-section.txt
+          else
+            echo "" > /tmp/branch-context-section.txt
+            echo "No branch context found — first run on this branch"
+          fi
+
       - name: Install Claude Code CLI
         run: |
           curl -fsSL https://claude.ai/install.sh | bash
@@ -190,6 +213,12 @@ jobs:
           sed -i "s|ISSUE_PLACEHOLDER|$ISSUE_NUM|g" /tmp/plan-prompt.txt
           sed -i "s|TITLE_PLACEHOLDER|$ISSUE_TITLE|g" /tmp/plan-prompt.txt
 
+          # Append branch context (persistent memory from previous runs)
+          if [ -s /tmp/branch-context-section.txt ]; then
+            printf "\n\n" >> /tmp/plan-prompt.txt
+            cat /tmp/branch-context-section.txt >> /tmp/plan-prompt.txt
+          fi
+
           echo "=== Phase 1: Planning (Opus) ==="
           claude -p --dangerously-skip-permissions \
             --model claude-opus-4-6 \
@@ -206,6 +235,55 @@ jobs:
             echo "PLAN_CREATED=false" >> "$GITHUB_ENV"
             echo "Plan file not created — extracting from output"
             echo "Auto-extracted plan from Claude output" > /tmp/plan.md
+            tail -50 /tmp/phase1-output.txt >> /tmp/plan.md
+          fi
+
+      - name: "Phase 1: Plan (Codex)"
+        id: plan_codex
+        if: steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MAX_CODEX_TURNS: "12"
+          CODEX_MAX_SESSIONS: "2"
+          PHASE_NAME: "Планирование"
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+          BRANCH_CTX=""
+          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
+
+          cat > /tmp/plan-context.txt << CONTEXT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          TASK: Create a detailed implementation plan for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
+
+          ${BRANCH_CTX}
+
+          Read the issue body from GitHub:
+          $(cat /dev/stdin <<< "$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/issues/${ISSUE_NUM}" | jq -r '.body // ""')")
+
+          Start by reading CLAUDE.md, then explore the codebase.
+          Write the plan to /tmp/plan.md.
+          CONTEXT_EOF
+
+          echo "=== Phase 1: Planning (Codex) ==="
+          ./codex-agent.sh plan /tmp/plan-context.txt 2>&1 | tee /tmp/phase1-output.txt
+
+          if [ -f /tmp/plan.md ]; then
+            echo "PLAN_CREATED=true" >> "$GITHUB_ENV"
+            echo "=== Plan contents ==="
+            cat /tmp/plan.md
+          else
+            echo "PLAN_CREATED=false" >> "$GITHUB_ENV"
+            echo "Plan file not created"
+            echo "Auto-extracted plan from Codex output" > /tmp/plan.md
             tail -50 /tmp/phase1-output.txt >> /tmp/plan.md
           fi
 
@@ -374,6 +452,9 @@ jobs:
 
             CURRENT_PLAN=$(cat /tmp/plan.md 2>/dev/null || echo "")
 
+            BRANCH_CTX=""
+            [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
+
             cat > /tmp/revise-prompt.txt << REVISE_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
@@ -384,6 +465,8 @@ jobs:
 
           DEVELOPER FEEDBACK (address these concerns):
           ${FEEDBACK}
+
+          ${BRANCH_CTX}
 
           INSTRUCTIONS:
           1. Read the developer's feedback carefully
@@ -439,6 +522,9 @@ jobs:
             REVIEW=$(cat /tmp/codex-plan-review.txt)
           fi
 
+          BRANCH_CTX=""
+          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
+
           cat > /tmp/implement-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
@@ -450,6 +536,8 @@ jobs:
           REVIEWER FEEDBACK (address any concerns):
           ${REVIEW}
 
+          ${BRANCH_CTX}
+
           WORKFLOW:
           1. Read CLAUDE.md for project rules
           2. Implement the changes according to the plan
@@ -457,6 +545,16 @@ jobs:
           4. ./notify.sh progress "Brief description of what was done"
           5. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
           6. git push origin ${BRANCH}
+          7. Write lessons learned to /tmp/agent-lessons.md (see TRANSCRIPT below)
+
+          TRANSCRIPT & LESSONS (mandatory — write to /tmp/agent-lessons.md before finishing):
+          After pushing your code, create /tmp/agent-lessons.md with:
+          - **Decisions**: key choices you made and WHY (e.g. "Used X instead of Y because Z")
+          - **Failed approaches**: what you tried that didn't work and why (e.g. "Tried patching foo.ts but import cycle prevented it")
+          - **Errors fixed**: build/test errors you encountered and how you fixed them
+          - **Developer preferences**: any patterns or conventions you noticed the developer prefers
+          - **Warnings for next run**: things the next agent should know (e.g. "Don't touch file X, it has circular deps")
+          Keep it concise but specific (5-15 lines). This file persists across CI runs as branch memory.
 
           RULES:
           - Stay on branch ${BRANCH}
@@ -499,6 +597,64 @@ jobs:
             --continue \
             --max-turns 30 \
             --verbose
+
+      - name: "Phase 3: Implement (Codex)"
+        id: implement_codex
+        if: steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MAX_CODEX_TURNS: "12"
+          CODEX_MAX_SESSIONS: "3"
+          CODEX_PROFILE: ${{ steps.profile.outputs.profile || 'small' }}
+          PHASE_NAME: "Реализация"
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+          PLAN=""
+          if [ -f /tmp/plan.md ]; then
+            PLAN=$(cat /tmp/plan.md)
+          fi
+
+          REVIEW=""
+          if [ -f /tmp/codex-plan-review.txt ]; then
+            REVIEW=$(cat /tmp/codex-plan-review.txt)
+          fi
+
+          BRANCH_CTX=""
+          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
+
+          cat > /tmp/impl-context.txt << CONTEXT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
+
+          YOUR PLAN (from Phase 1):
+          ${PLAN}
+
+          REVIEWER FEEDBACK (address any concerns):
+          ${REVIEW}
+
+          ${BRANCH_CTX}
+
+          After implementing:
+          1. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
+          2. git push origin ${BRANCH}
+          3. Write lessons to /tmp/agent-lessons.md (decisions made, failed approaches, errors fixed, warnings for next run — 5-15 lines)
+          4. Call done()
+
+          Stay on branch ${BRANCH}. Follow project conventions from CLAUDE.md.
+          CONTEXT_EOF
+
+          echo "=== Phase 3: Implementing (Codex) ==="
+          ./codex-agent.sh implement /tmp/impl-context.txt 2>&1 | tee /tmp/phase3-output.txt
 
       # --- Notify: Phase 3 result ---
       - name: "Notify: Phase 3 — Implementation"
@@ -626,7 +782,49 @@ jobs:
             --model claude-opus-4-6 \
             --max-turns 20 \
             --verbose \
-            "$(cat /tmp/fix-prompt.txt)"
+            "$(cat /tmp/fix-prompt.txt)" 2>&1 | tee /tmp/fix-review-output.txt
+
+      # Fix issues found by code review (one pass) — Codex fixes
+      - name: "Phase 4: Fix review issues (Codex)"
+        id: fix_review_codex
+        if: steps.dev.outputs.multi_agent == 'true' && env.CODE_REVIEW_OK == 'false' && steps.dev.outputs.codex_impl == 'true'
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
+          BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
+          DEV_BRANCH: ${{ steps.dev.outputs.branch }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MAX_CODEX_TURNS: "12"
+          CODEX_MAX_SESSIONS: "2"
+          CODEX_PROFILE: ${{ steps.profile.outputs.profile || 'small' }}
+          PHASE_NAME: "Исправления"
+        run: |
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          ISSUE_NUM="${{ github.event.issue.number }}"
+
+          REVIEW=""
+          if [ -f /tmp/codex-code-review.txt ]; then
+            REVIEW=$(cat /tmp/codex-code-review.txt)
+          fi
+
+          cat > /tmp/fix-context.txt << CONTEXT_EOF
+          You are working in a GitHub repository on branch "${BRANCH}".
+
+          A code reviewer (Opus) found issues with your implementation for Issue #${ISSUE_NUM}.
+
+          REVIEW FEEDBACK:
+          ${REVIEW}
+
+          Fix the issues, then:
+          1. git add -A && git commit -m "fix: address code review feedback (#${ISSUE_NUM})"
+          2. git push origin ${BRANCH}
+          3. Call done()
+          CONTEXT_EOF
+
+          echo "=== Phase 4: Fixing review issues (Codex) ==="
+          ./codex-agent.sh implement /tmp/fix-context.txt 2>&1 | tee /tmp/fix-review-output.txt
 
       # --- Notify: Phase 4 fix result ---
       - name: "Notify: Phase 4 — Fix applied"
@@ -864,10 +1062,15 @@ jobs:
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
+          BRANCH_CTX=""
+          [ -s /tmp/branch-context-section.txt ] && BRANCH_CTX=$(cat /tmp/branch-context-section.txt)
+
           cat > /tmp/sonnet-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
 
           TASK: Implement changes for Issue #${ISSUE_NUM}: "${ISSUE_TITLE}"
+
+          ${BRANCH_CTX}
 
           WORKFLOW:
           1. ./notify.sh plan "Your plan"
@@ -875,6 +1078,7 @@ jobs:
           3. Implement changes
           4. git add -A && git commit -m "feat: ${ISSUE_TITLE} (#${ISSUE_NUM})"
           5. git push origin ${BRANCH}
+          6. Write lessons to /tmp/agent-lessons.md (decisions, failed approaches, errors, warnings — 5-15 lines)
 
           RULES:
           - Stay on branch ${BRANCH}
@@ -1000,6 +1204,220 @@ jobs:
 
           git add DEVLOG.md
           git commit -m "docs: update DEVLOG for #${ISSUE_NUM}" || true
+          git push origin "$BRANCH" || true
+
+      # ============================================================
+      # UPDATE BRANCH CONTEXT (persistent memory for next run)
+      # ============================================================
+
+      - name: Update branch context
+        if: always() && steps.verify.outputs.pushed == 'true'
+        continue-on-error: true
+        run: |
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          ISSUE_NUM="${{ steps.dev.outputs.issue_number }}"
+          ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
+          TODAY=$(date +%Y-%m-%d)
+          COMMIT_SHORT="${{ steps.verify.outputs.commit_sha_short }}"
+
+          mkdir -p .claude
+
+          # Initialize file if it doesn't exist
+          if [ ! -f .claude/branch-context.md ]; then
+            {
+              echo "# Branch Context: ${BRANCH}"
+              echo ""
+              echo "Persistent memory across CI runs — the CI equivalent of IDE chat history."
+              echo "Contains: full plans, review feedback, errors, failed approaches, lessons learned."
+              echo "Read by agent at start of each run to avoid repeating mistakes."
+              echo ""
+            } > .claude/branch-context.md
+          fi
+
+          # --- Gather rich data for the entry ---
+
+          CHANGED_FILES=$(git diff --name-only "$INITIAL_SHA".."$(git rev-parse HEAD)" 2>/dev/null \
+            | grep -v 'branch-context\|DEVLOG' | head -20 | tr '\n' ', ' | sed 's/,$//')
+
+          # Full plan (up to 8KB — this is the most valuable context for future runs)
+          PLAN_TEXT=""
+          if [ -f /tmp/plan.md ]; then
+            PLAN_TEXT=$(head -c 8000 /tmp/plan.md)
+          fi
+
+          # Full review feedback (up to 3KB each)
+          REVIEW_TEXT=""
+          if [ -f /tmp/codex-plan-review.txt ]; then
+            PLAN_REVIEW=$(head -c 3000 /tmp/codex-plan-review.txt)
+            [ -n "$PLAN_REVIEW" ] && REVIEW_TEXT="Plan review:
+          ${PLAN_REVIEW}"
+          fi
+          if [ -f /tmp/codex-code-review.txt ]; then
+            CODE_REVIEW=$(head -c 3000 /tmp/codex-code-review.txt)
+            if [ -n "$CODE_REVIEW" ]; then
+              REVIEW_TEXT="${REVIEW_TEXT}
+
+          Code review (${CODE_REVIEW_OK:-unknown}):
+          ${CODE_REVIEW}"
+            fi
+          fi
+
+          # Review fix — what was corrected after review feedback (up to 3KB)
+          REVIEW_FIX=""
+          if [ -f /tmp/fix-review-output.txt ]; then
+            # Extract notify.sh messages from fix-review (what the agent said it fixed)
+            FIX_MSGS=$(grep "Sent to Telegram:" /tmp/fix-review-output.txt 2>/dev/null | sed 's/.*Sent to Telegram: //' | head -10)
+            # Get the diff of what was actually changed during the fix
+            # fix-review runs AFTER the main implementation commit, so diff from implementation commit to HEAD
+            FIX_DIFF=$(git log --oneline "$INITIAL_SHA"..HEAD 2>/dev/null | head -5)
+            REVIEW_FIX="Fix agent messages: ${FIX_MSGS}
+          Commits after review: ${FIX_DIFF}"
+          fi
+
+          # Agent-written lessons (the agent writes to this file during execution)
+          AGENT_LESSONS=""
+          if [ -f /tmp/agent-lessons.md ]; then
+            AGENT_LESSONS=$(head -c 4000 /tmp/agent-lessons.md)
+          fi
+
+          # Error transcript — build/test failures (up to 3KB)
+          ERROR_LOG=""
+          for f in /tmp/build-error.log /tmp/test-error.log; do
+            if [ -f "$f" ]; then
+              ERROR_LOG="${ERROR_LOG}
+          $(basename "$f"):
+          $(tail -c 1500 "$f")"
+            fi
+          done
+
+          # Test results — smoke and performance (up to 4KB total)
+          TEST_RESULTS=""
+          if [ "${SMOKE_OK:-}" = "true" ]; then
+            TEST_RESULTS="Smoke tests: PASSED"
+          elif [ "${SMOKE_OK:-}" = "false" ]; then
+            SMOKE_FAIL=$(grep -E "FAIL|Error|✘|expect|timeout" /tmp/smoke-output.txt 2>/dev/null | head -10)
+            TEST_RESULTS="Smoke tests: FAILED
+          ${SMOKE_FAIL}"
+            # If auto-fix was attempted, include that context
+            if [ -f /tmp/fix-smoke-output.txt ]; then
+              FIX_RESULT=$(tail -20 /tmp/fix-smoke-output.txt 2>/dev/null)
+              TEST_RESULTS="${TEST_RESULTS}
+
+          Auto-fix attempt:
+          ${FIX_RESULT}"
+            fi
+          fi
+          if [ "${PERF_OK:-}" = "true" ]; then
+            TEST_RESULTS="${TEST_RESULTS}
+          Performance tests: PASSED"
+          elif [ "${PERF_OK:-}" = "false" ]; then
+            PERF_FAIL=$(grep -E "exceeds|below|grew|budget|regression" /tmp/perf-output.txt 2>/dev/null | head -10)
+            TEST_RESULTS="${TEST_RESULTS}
+          Performance tests: FAILED
+          ${PERF_FAIL}"
+            if [ -f /tmp/fix-perf-output.txt ]; then
+              FIX_RESULT=$(tail -20 /tmp/fix-perf-output.txt 2>/dev/null)
+              TEST_RESULTS="${TEST_RESULTS}
+
+          Auto-fix attempt:
+          ${FIX_RESULT}"
+            fi
+          fi
+
+          # Git diff summary (what actually changed, up to 5KB)
+          DIFF_STAT=$(git diff --stat "$INITIAL_SHA".."$(git rev-parse HEAD)" 2>/dev/null | tail -20)
+
+          # Agent transcript — extract notify.sh messages from phase outputs (agent's "thinking out loud")
+          TRANSCRIPT=""
+          for f in /tmp/phase1-output.txt /tmp/phase3-output.txt /tmp/sonnet-output.txt; do
+            if [ -f "$f" ]; then
+              # Capture lines with "Sent to Telegram" (successful notify.sh calls)
+              MSGS=$(grep "Sent to Telegram:" "$f" 2>/dev/null | sed 's/.*Sent to Telegram: //' | head -20)
+              [ -n "$MSGS" ] && TRANSCRIPT="${TRANSCRIPT}${MSGS}
+          "
+            fi
+          done
+
+          # --- Build the entry ---
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "## #${ISSUE_NUM} — ${ISSUE_TITLE} (${TODAY})"
+            echo "Commit: ${COMMIT_SHORT}"
+            echo "Files: ${CHANGED_FILES}"
+            echo ""
+
+            if [ -n "$PLAN_TEXT" ]; then
+              echo "### Plan"
+              echo "$PLAN_TEXT"
+              echo ""
+            fi
+
+            if [ -n "$REVIEW_TEXT" ]; then
+              echo "### Review feedback"
+              echo "$REVIEW_TEXT"
+              echo ""
+            fi
+
+            if [ -n "$REVIEW_FIX" ]; then
+              echo "### Corrections after review"
+              echo "$REVIEW_FIX"
+              echo ""
+            fi
+
+            if [ -n "$TRANSCRIPT" ]; then
+              echo "### Agent transcript"
+              echo "$TRANSCRIPT"
+              echo ""
+            fi
+
+            if [ -n "$AGENT_LESSONS" ]; then
+              echo "### Lessons learned (agent-written)"
+              echo "$AGENT_LESSONS"
+              echo ""
+            fi
+
+            if [ -n "$ERROR_LOG" ]; then
+              echo "### Errors encountered"
+              echo '```'
+              echo "$ERROR_LOG"
+              echo '```'
+              echo ""
+            fi
+
+            if [ -n "$TEST_RESULTS" ]; then
+              echo "### Test results"
+              echo '```'
+              echo "$TEST_RESULTS"
+              echo '```'
+              echo ""
+            fi
+
+            if [ -n "$DIFF_STAT" ]; then
+              echo "### Diff summary"
+              echo '```'
+              echo "$DIFF_STAT"
+              echo '```'
+              echo ""
+            fi
+          } >> .claude/branch-context.md
+
+          # Rotate if too large: keep header (first 6 lines) + last ~50KB
+          # 50KB ≈ 15K tokens ≈ 7% of Claude's 200K context — negligible overhead
+          CTX_SIZE=$(wc -c < .claude/branch-context.md)
+          if [ "$CTX_SIZE" -gt 60000 ]; then
+            echo "Branch context rotating ($CTX_SIZE bytes → ~50KB)..."
+            head -6 .claude/branch-context.md > /tmp/ctx-rotated.md
+            echo "" >> /tmp/ctx-rotated.md
+            echo "[older entries trimmed — $(date +%Y-%m-%d)]" >> /tmp/ctx-rotated.md
+            echo "" >> /tmp/ctx-rotated.md
+            tail -c 50000 .claude/branch-context.md >> /tmp/ctx-rotated.md
+            mv /tmp/ctx-rotated.md .claude/branch-context.md
+          fi
+
+          git add .claude/branch-context.md
+          git commit -m "chore: update branch context for #${ISSUE_NUM}" || true
           git push origin "$BRANCH" || true
 
       # ============================================================
