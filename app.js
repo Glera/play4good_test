@@ -637,35 +637,51 @@ function createParticles(x, y) {
     }
 }
 
-// Animate a tile along a cubic Bezier arc using CSS transforms (GPU-accelerated)
-// P0=start, P1=ctrl1 (scatter), P2=ctrl2 (converge), P3=end
-function animateArc(el, startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY, duration, onDone) {
+// Animate a tile along a parametric egg-curve arc using CSS transforms (GPU-accelerated)
+// Lateral displacement follows sin(πt) — smooth scatter outward and return
+// amplitude: peak lateral offset (positive = +perp direction, negative = -perp)
+// perpX/perpY: unit perpendicular vector to the A→B axis
+// onContact: called once at ~95% progress (early removal point)
+function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, duration, onContact) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
     el.style.zIndex = 10000;
     el.style.willChange = 'transform';
+    let contactFired = false;
+    const tContact = 0.95;
 
     function step(now) {
         const tLinear = Math.min((now - startTime) / duration, 1);
-        // Ease-out-in: fast launch, slow at mid-arc, fast finish.
-        const sway = 0.12;
-        const t = Math.min(1, Math.max(0, tLinear + sway * Math.sin(Math.PI * 2 * tLinear)));
-        // Cubic Bezier: B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
-        const inv = 1 - t;
-        const inv2 = inv * inv;
-        const inv3 = inv2 * inv;
-        const t2 = t * t;
-        const t3 = t2 * t;
-        const x = inv3 * startX + 3 * inv2 * t * ctrl1X + 3 * inv * t2 * ctrl2X + t3 * endX;
-        const y = inv3 * startY + 3 * inv2 * t * ctrl1Y + 3 * inv * t2 * ctrl2Y + t3 * endY;
-        const dx = x - startX;
-        const dy = y - startY;
-        el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+        // Smoothstep easing with linear mix to prevent mid-arc stalling
+        const ss = tLinear * tLinear * (3 - 2 * tLinear);
+        const t = ss * 0.92 + tLinear * 0.08;
+
+        // Longitudinal: linear interpolation start → end
+        const longX = startX + (endX - startX) * t;
+        const longY = startY + (endY - startY) * t;
+
+        // Lateral: egg-curve via sin(πt) — smooth scatter and return
+        const lateral = Math.sin(Math.PI * t) * amplitude;
+        const x = longX + perpX * lateral;
+        const y = longY + perpY * lateral;
+
+        el.style.transform = `translate3d(${x - startX}px, ${y - startY}px, 0)`;
+
+        // Fire contact callback once when nearing destination (t threshold guards frame skipping)
+        if (!contactFired && tLinear >= tContact) {
+            contactFired = true;
+            if (onContact) onContact();
+        }
+
         if (tLinear < 1) {
             requestAnimationFrame(step);
         } else {
             el.style.willChange = '';
-            if (onDone) onDone();
+            // Ensure contact fires even if we jumped past tContact in one frame
+            if (!contactFired) {
+                contactFired = true;
+                if (onContact) onContact();
+            }
         }
     }
     requestAnimationFrame(step);
@@ -683,62 +699,7 @@ function calcDirection(dx, dy, dist) {
     return { nx, ny, perpX: -ny, perpY: nx };
 }
 
-// Compute a scatter control point (ctrl1): tile flies AWAY from partner
-// sign: +1 for tile A, -1 for tile B (opposite perpendicular directions)
-// Scale scatter by tileH/tileW ratio on Y-axis to avoid overlap with non-square tiles
-function calcScatterCtrl(cx, cy, nx, ny, perpX, perpY, scatterDist, sign, tileW, tileH) {
-    const yScale = tileH / tileW;
-    const sideDist = Math.min(tileW * 0.6, scatterDist * 0.35);
-    const awayX = cx - sign * nx * scatterDist;
-    const awayY = cy - sign * ny * scatterDist;
-    const x = awayX + sign * perpX * sideDist - tileW / 2;
-    const y = awayY + sign * perpY * sideDist * yScale - tileH / 2;
-    return [x, y];
-}
-
-// Compute a converge control point (ctrl2): tile curves toward meeting point
-// sign: +1 for tile A, -1 for tile B
-function calcConvergeCtrl(meetX, meetY, perpX, perpY, sign, tileW, tileH) {
-    const x = meetX + sign * perpX * tileW * 0.15 - tileW / 2;
-    const y = meetY + sign * perpY * tileH * 0.15 - tileH / 2;
-    return [x, y];
-}
-
-// Clamp a pair of control points to board bounds, preserving visual symmetry.
-// Each control point is clamped relative to its own reference point (refX/refY)
-// — for scatter ctrl1 this is the tile's start, for converge ctrl2 the meeting point.
-// If one is clamped more, the other's offset is scaled to match.
-function clampCtrlPairSymmetric(x1, y1, ref1X, ref1Y, x2, y2, ref2X, ref2Y, boardW, boardH, pad) {
-    let cx1 = Math.max(-pad, Math.min(boardW + pad, x1));
-    let cy1 = Math.max(-pad, Math.min(boardH + pad, y1));
-    let cx2 = Math.max(-pad, Math.min(boardW + pad, x2));
-    let cy2 = Math.max(-pad, Math.min(boardH + pad, y2));
-
-    const shrink1 = Math.sqrt((cx1 - x1) ** 2 + (cy1 - y1) ** 2);
-    const shrink2 = Math.sqrt((cx2 - x2) ** 2 + (cy2 - y2) ** 2);
-
-    if (shrink1 > 0 && shrink1 > shrink2) {
-        const origDist1 = Math.sqrt((x1 - ref1X) ** 2 + (y1 - ref1Y) ** 2);
-        if (origDist1 > 0) {
-            const clampDist1 = Math.sqrt((cx1 - ref1X) ** 2 + (cy1 - ref1Y) ** 2);
-            const ratio = clampDist1 / origDist1;
-            cx2 = ref2X + (x2 - ref2X) * ratio;
-            cy2 = ref2Y + (y2 - ref2Y) * ratio;
-        }
-    } else if (shrink2 > 0 && shrink2 > shrink1) {
-        const origDist2 = Math.sqrt((x2 - ref2X) ** 2 + (y2 - ref2Y) ** 2);
-        if (origDist2 > 0) {
-            const clampDist2 = Math.sqrt((cx2 - ref2X) ** 2 + (cy2 - ref2Y) ** 2);
-            const ratio = clampDist2 / origDist2;
-            cx1 = ref1X + (x1 - ref1X) * ratio;
-            cy1 = ref1Y + (y1 - ref1Y) * ratio;
-        }
-    }
-
-    return [cx1, cy1, cx2, cy2];
-}
-
-// Remove a matched pair with fly-together arc animation
+// Remove a matched pair with egg-curve arc animation
 function removePair(a, b) {
     a.removing = true;
     b.removing = true;
@@ -804,47 +765,24 @@ function removePair(a, b) {
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Scatter distance: how far each tile flies outward from start
+    // Egg-curve amplitude: lateral scatter distance (3–5× tileW, clamped to board)
     const boardSpan = Math.min(boardW, boardH);
-    const maxScatter = boardSpan * 0.45;
-    const minScatter = Math.max(tileW * 1.6, halfExtent * 1.2);
-    const idealScatter = Math.max(dist * 1.3, tileW * 2.2);
-    const scatterDist = Math.min(Math.max(minScatter, idealScatter), maxScatter);
-
-    // Build control points: scatter (ctrl1) then converge (ctrl2)
-    let ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By;
-    let ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By;
-    [ctrl1Ax, ctrl1Ay] = calcScatterCtrl(aCx, aCy, nx, ny, perpX, perpY, scatterDist, +1, tileW, tileH);
-    [ctrl1Bx, ctrl1By] = calcScatterCtrl(bCx, bCy, nx, ny, perpX, perpY, scatterDist, -1, tileW, tileH);
-    [ctrl2Ax, ctrl2Ay] = calcConvergeCtrl(meetX, meetY, perpX, perpY, +1, tileW, tileH);
-    [ctrl2Bx, ctrl2By] = calcConvergeCtrl(meetX, meetY, perpX, perpY, -1, tileW, tileH);
-
-    // Clamp control points to board bounds, preserving symmetry
-    // Small padding allows scatter points to extend slightly beyond board edges
-    // but not far enough to cause viewport scrolling on mobile
-    const pad = Math.min(boardSpan * 0.1, tileW * 1.2);
-    [ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By] = clampCtrlPairSymmetric(
-        ctrl1Ax, ctrl1Ay, aCx - tileW / 2, aCy - tileH / 2,
-        ctrl1Bx, ctrl1By, bCx - tileW / 2, bCy - tileH / 2,
-        boardW, boardH, pad
-    );
-    [ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By] = clampCtrlPairSymmetric(
-        ctrl2Ax, ctrl2Ay, meetX - tileW / 2, meetY - tileH / 2,
-        ctrl2Bx, ctrl2By, meetX - tileW / 2, meetY - tileH / 2,
-        boardW, boardH, pad
-    );
+    const maxAmplitude = boardSpan * 0.4;
+    const idealAmplitude = tileW * 3.5;
+    const amplitude = Math.min(Math.max(tileW * 3, idealAmplitude), tileW * 5, maxAmplitude);
 
     // Duration scales with distance for smooth arc animation
     const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
-    let finished = 0;
+    let contactCount = 0;
 
-    function onFinish() {
-        finished++;
-        if (finished === 2) {
+    // onContact fires at ~95% progress for each tile (early removal)
+    // Both must fire before actual removal — shared counter guards synchronicity
+    function onContact() {
+        contactCount++;
+        if (contactCount === 2) {
             createParticles(meetX, meetY);
-            // Remove tiles from DOM immediately (no fade-out)
-            if (elA && elA.parentNode) elA.remove();
-            if (elB && elB.parentNode) elB.remove();
+            if (elA.parentNode) elA.remove();
+            if (elB.parentNode) elB.remove();
             a.removing = false;
             b.removing = false;
             a.removed = true;
@@ -867,8 +805,9 @@ function removePair(a, b) {
     // not after it finishes
     updateTileStates();
 
-    animateArc(elA, ax, ay, ctrl1Ax, ctrl1Ay, ctrl2Ax, ctrl2Ay, endAx, endAy, duration, onFinish);
-    animateArc(elB, bx, by, ctrl1Bx, ctrl1By, ctrl2Bx, ctrl2By, endBx, endBy, duration, onFinish);
+    // Tile A scatters in +perpendicular direction, tile B in -perpendicular
+    animateArc(elA, ax, ay, endAx, endAy, amplitude, perpX, perpY, duration, onContact);
+    animateArc(elB, bx, by, endBx, endBy, -amplitude, perpX, perpY, duration, onContact);
 }
 
 // Update UI counters
