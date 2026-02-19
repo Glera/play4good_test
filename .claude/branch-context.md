@@ -456,3 +456,67 @@ const maxAmplitude = tileW * 4;
  2 files changed, 38 insertions(+), 5 deletions(-)
 ```
 
+
+---
+
+## #164 — тестирую новую логику очереди (1) (2026-02-19)
+Commit: 40bba39
+Files: 
+
+### Plan
+# Plan: Issue #164 — тестирую новую логику очереди (1)
+
+## Суть
+Это тестовый тикет для проверки новой системы очереди (persistent ticket queue via GitHub Issues labels). Разработчик проверяет, что:
+1. CI воркфлоу корректно триггерится по лейблу `queue:execute` (а не по `issues:opened`)
+2. Бот корректно управляет порядком выполнения через `queue:pending` → `queue:execute`
+3. Агент успешно получает и обрабатывает тикет
+4. Уведомления через `notify.sh` доходят в Telegram
+
+## Изменения кода
+Никаких изменений кода не требуется — тикет не содержит задачи на реализацию.
+
+## Файлы для изменения
+- `DEVLOG.md` — добавить запись о тестовом прогоне очереди
+
+## Что будет сделано
+1. Отправить уведомление `notify.sh plan` (подтверждение что агент запустился)
+2. Подтвердить что pipeline отработал корректно
+3. Добавить запись в DEVLOG.md
+4. Отправить `notify.sh done`
+5. Закрыть issue
+
+## Краевые случаи
+- Нет — это тестовый тикет без кодовых изменений
+
+## Тестирование
+- Сам факт выполнения этого плана является тестом очереди
+- Проверка: уведомления дошли, DEVLOG обновлён, issue закрыт
+
+### Lessons learned (agent-written)
+# Agent Lessons — Issue #164
+
+## Decisions
+- **No code changes**: This was a test ticket for the new queue system (persistent ticket queue via GitHub Issues labels). Only DEVLOG.md was updated to record the test run.
+- **Simple DEVLOG entry**: Documented that the queue system works — CI triggers on `queue:execute` label, agent processes the ticket, notifications reach Telegram.
+
+## Failed approaches
+- None — straightforward test ticket.
+
+## Errors fixed
+- None — no tests to run (no code changes).
+
+## Developer preferences
+- Developer uses test tickets to verify CI/queue infrastructure before relying on it for real work.
+- Same workflow applies even for no-code tickets: notify → DEVLOG → commit → push.
+
+## Warnings for next run
+- Remote branch may have CI-generated commits — always check before push.
+- DEVLOG.md has duplicate #162 entries (pre-existing) — left as-is.
+
+### Diff summary
+```
+ DEVLOG.md | 165 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 165 insertions(+)
+```
+
