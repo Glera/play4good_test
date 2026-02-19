@@ -757,10 +757,14 @@ function removePair(a, b) {
     // Direction & perpendicular vectors (with explicit guard for coincident tiles)
     const { nx, ny, perpX, perpY } = calcDirection(dx, dy, dist);
 
-    // Both tiles converge to the same meeting point (same height at contact)
-    const endAx = meetX - tileW / 2;
+    // Tiles always meet SIDE BY SIDE horizontally (боковые грани)
+    // regardless of whether they're horizontal, vertical, or diagonal
+    // Left tile stays left, right tile stays right (no crossing)
+    const aIsLeft = aCx < bCx || (aCx === bCx && aCy < bCy);
+    const sideGap = tileW * 0.5;
+    const endAx = meetX + (aIsLeft ? -sideGap : sideGap) - tileW / 2;
     const endAy = meetY - tileH / 2;
-    const endBx = meetX - tileW / 2;
+    const endBx = meetX + (aIsLeft ? sideGap : -sideGap) - tileW / 2;
     const endBy = meetY - tileH / 2;
 
     // Board layout dimensions (pre-transform)
