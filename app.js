@@ -647,7 +647,7 @@ function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, dur
     const startTime = performance.now();
     el.classList.add('flying');
     let contactFired = false;
-    if (tContact === undefined) tContact = 0.93;
+    if (tContact === undefined) tContact = 0.98;
 
     function step(now) {
         const t = Math.min((now - startTime) / duration, 1);
@@ -784,10 +784,12 @@ function removePair(a, b) {
     const amplitude = Math.min(baseAmplitude * boost, maxAmplitude);
 
     // Compute tContact from geometry: remove tiles when their edges would just touch
+    // Use scale at t=0.98 (nominal contact time), not t=1, for accurate gap estimate
     // endGap = edge-to-edge gap at endpoint; negative means overlap
     // If no overlap → fire late (0.98); if overlap → fire earlier proportionally
-    const endScale = 1 - 0.08; // scale at t=1 from animateArc: 1 - 0.08*t*t
-    const endGap = 2 * sideGap - tileW * endScale;
+    const nominalT = 0.98;
+    const scaleAtContact = 1 - 0.08 * nominalT * nominalT; // animateArc: scale = 1 - 0.08*t*t
+    const endGap = 2 * sideGap - tileW * scaleAtContact;
     const tContact = endGap >= 0 ? 0.98 : Math.max(0.90, 0.98 + endGap / tileW);
 
     // Duration scales with distance for smooth arc animation
