@@ -649,7 +649,7 @@ function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, dur
     el.style.zIndex = 10000;
     el.style.willChange = 'transform';
     let contactFired = false;
-    const tContact = 0.94;
+    const tContact = 0.98;
 
     function step(now) {
         const t = Math.min((now - startTime) / duration, 1);
@@ -761,7 +761,7 @@ function removePair(a, b) {
     // regardless of whether they're horizontal, vertical, or diagonal
     // Left tile stays left, right tile stays right (no crossing)
     const aIsLeft = aCx < bCx || (aCx === bCx && aCy < bCy);
-    const sideGap = tileW * 0.5;
+    const sideGap = Math.min(tileW * 0.15, dist * 0.4);
     const endAx = meetX + (aIsLeft ? -sideGap : sideGap) - tileW / 2;
     const endAy = meetY - tileH / 2;
     const endBx = meetX + (aIsLeft ? sideGap : -sideGap) - tileW / 2;
@@ -792,7 +792,7 @@ function removePair(a, b) {
     const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
     let contactCount = 0;
 
-    // onContact fires at ~92% progress for each tile (early removal)
+    // onContact fires at ~98% progress for each tile (near-contact removal)
     // Both must fire before actual removal — shared counter guards synchronicity
     function onContact() {
         contactCount++;
