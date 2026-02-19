@@ -638,11 +638,9 @@ function createParticles(x, y) {
 }
 
 // Animate a tile along a parametric egg-curve arc using CSS transforms (GPU-accelerated)
-// Phase 1 (~0-30%): tiles scatter laterally while barely moving forward
-// Phase 2 (~30-100%): tiles rush toward meeting point as lateral fades to zero
-// amplitude: peak lateral offset (positive = +perp direction, negative = -perp)
-// perpX/perpY: unit perpendicular vector to the A→B axis
-// onContact: called once at ~92% progress (early removal point)
+// Longitudinal: smoothstep — 50% at midpoint, 98% at contact (distance-independent)
+// Lateral: fast-decaying bell — peaks at ~14%, mostly gone by midpoint
+// This gives "scatter first, then converge" feel without starving forward movement
 function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, duration, onContact) {
     const startTime = performance.now();
     el.style.pointerEvents = 'none';
@@ -654,13 +652,15 @@ function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, dur
     function step(now) {
         const t = Math.min((now - startTime) / duration, 1);
 
-        // Longitudinal: cubic ease-in — tiles linger near start, then accelerate to end
-        // At t=0.3 only 2.7% forward; at t=0.7 already 34%; at t=0.9 → 73%
-        const tLong = t * t * t;
+        // Longitudinal: smoothstep — 50% at midpoint, 98.1% at t=0.92 (contact)
+        // Works for any distance: tiles always visually reach meeting point
+        const tLong = t * t * (3 - 2 * t);
 
-        // Lateral: asymmetric bell curve peaking at ~20% of animation
-        // sqrt(t) * (1-t)^2 normalized to peak=1.0 (normalization factor ≈ 3.5)
-        const tLat = Math.sqrt(t) * (1 - t) * (1 - t) * 3.5;
+        // Lateral: fast-decaying bell, peak at ~14% of animation
+        // sqrt(t) * (1-t)^3 normalized to peak=1.0 (factor ≈ 4.2)
+        // At t=0.14: 1.0 (peak), t=0.3: 0.79, t=0.5: 0.37, t=0.7: 0.10, t=0.9: ~0
+        const omt = 1 - t;
+        const tLat = Math.sqrt(t) * omt * omt * omt * 4.2;
 
         // Position: start + forward progress + lateral scatter
         const x = startX + (endX - startX) * tLong + perpX * amplitude * tLat;
@@ -671,7 +671,6 @@ function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, dur
 
         el.style.transform = `translate3d(${x - startX}px, ${y - startY}px, 0) scale(${scale})`;
 
-        // Fire contact callback once when nearing destination
         if (!contactFired && t >= tContact) {
             contactFired = true;
             if (onContact) onContact();
