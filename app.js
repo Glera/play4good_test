@@ -753,23 +753,27 @@ function removePair(a, b) {
     // Direction & perpendicular vectors (with explicit guard for coincident tiles)
     const { nx, ny, perpX, perpY } = calcDirection(dx, dy, dist);
 
-    // End positions: tiles converge to near the meeting point
-    // halfExtent keeps a small gap so tiles don't fully overlap before particles fire
-    const halfExtent = (Math.abs(nx) * tileW + Math.abs(ny) * tileH) / 2;
-    const contactDist = halfExtent * 0.4;
-    const endAx = meetX - nx * contactDist - tileW / 2;
-    const endAy = meetY - ny * contactDist - tileH / 2;
-    const endBx = meetX + nx * contactDist - tileW / 2;
-    const endBy = meetY + ny * contactDist - tileH / 2;
+    // Both tiles converge to the same meeting point (same height at contact)
+    const endAx = meetX - tileW / 2;
+    const endAy = meetY - tileH / 2;
+    const endBx = meetX - tileW / 2;
+    const endBy = meetY - tileH / 2;
 
     // Board layout dimensions (pre-transform)
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Egg-curve amplitude: lateral scatter distance (1.8× tileW, clamped to 25% of board)
+    // Amplitude: dynamic based on distance and orientation
+    // Close tiles need bigger arcs to fly around each other
+    const closeness = Math.max(0, 1 - dist / (tileW * 6));
+    // Vertically stacked tiles (similar X) need extra-wide arcs
+    // |perpX| ≈ 1 when tiles are above/below each other
+    const verticalness = Math.abs(perpX);
+    const boost = 1 + closeness * (1 + verticalness);
+    // boost range: 1.0 (far apart) to 3.0 (close + vertically stacked)
     const boardSpan = Math.min(boardW, boardH);
-    const maxAmplitude = boardSpan * 0.25;
-    const amplitude = Math.min(tileW * 1.8, maxAmplitude);
+    const maxAmplitude = boardSpan * 0.35;
+    const amplitude = Math.min(tileW * 1.2 * boost, maxAmplitude);
 
     // Duration scales with distance for smooth arc animation
     const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
