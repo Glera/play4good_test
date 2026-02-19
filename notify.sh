@@ -5,6 +5,7 @@
 
 BOT_URL="${BOT_NOTIFY_URL:-https://play4good-bot.onrender.com}"
 BRANCH="${DEV_BRANCH:-${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}}"
+REPO="${GH_REPO:-${GITHUB_REPOSITORY:-}}"
 ISSUE_NUMBER="${ISSUE_NUMBER:-0}"
 PHASE="${PHASE_NAME:-}"
 
@@ -23,26 +24,28 @@ fi
 if command -v jq &>/dev/null; then
   JSON_BODY=$(jq -n \
     --arg branch "$BRANCH" \
+    --arg repo "$REPO" \
     --arg issue_number "$ISSUE_NUMBER" \
     --arg type "$TYPE" \
     --arg text "$MESSAGE" \
     --arg phase "$PHASE" \
-    '{branch: $branch, issue_number: $issue_number, type: $type, text: $text, phase_name: $phase}')
+    '{branch: $branch, repo: $repo, issue_number: $issue_number, type: $type, text: $text, phase_name: $phase}')
 elif command -v python3 &>/dev/null; then
   JSON_BODY=$(python3 -c "
 import json, sys
 print(json.dumps({
     'branch': sys.argv[1],
-    'issue_number': sys.argv[2],
-    'type': sys.argv[3],
-    'text': sys.argv[4],
-    'phase_name': sys.argv[5]
-}))" "$BRANCH" "$ISSUE_NUMBER" "$TYPE" "$MESSAGE" "$PHASE")
+    'repo': sys.argv[2],
+    'issue_number': sys.argv[3],
+    'type': sys.argv[4],
+    'text': sys.argv[5],
+    'phase_name': sys.argv[6]
+}))" "$BRANCH" "$REPO" "$ISSUE_NUMBER" "$TYPE" "$MESSAGE" "$PHASE")
 else
   # Last resort: basic escaping (handles newlines, quotes, backslashes)
   SAFE_MSG=$(printf '%s' "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' ')
   SAFE_PHASE=$(printf '%s' "$PHASE" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  JSON_BODY="{\"branch\":\"$BRANCH\",\"issue_number\":\"$ISSUE_NUMBER\",\"type\":\"$TYPE\",\"text\":\"$SAFE_MSG\",\"phase_name\":\"$SAFE_PHASE\"}"
+  JSON_BODY="{\"branch\":\"$BRANCH\",\"repo\":\"$REPO\",\"issue_number\":\"$ISSUE_NUMBER\",\"type\":\"$TYPE\",\"text\":\"$SAFE_MSG\",\"phase_name\":\"$SAFE_PHASE\"}"
 fi
 
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BOT_URL/claude/message" \

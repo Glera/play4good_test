@@ -156,7 +156,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\",\"options\":{\"multi_agent\":\"${{ steps.dev.outputs.multi_agent }}\",\"testing\":\"${{ steps.dev.outputs.testing }}\",\"approve\":\"${{ steps.dev.outputs.approve }}\"}}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\",\"options\":{\"multi_agent\":\"${{ steps.dev.outputs.multi_agent }}\",\"testing\":\"${{ steps.dev.outputs.testing }}\",\"approve\":\"${{ steps.dev.outputs.approve }}\"}}"
 
       # ============================================================
       # PHASE 1: PLAN (Claude writes a plan)
@@ -168,7 +168,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Планирование\",\"phase_num\":\"1\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Планирование\",\"phase_num\":\"1\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 1: Plan (Opus)"
         id: plan
@@ -314,7 +314,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Codex ревью\",\"phase_num\":\"2\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Codex ревью\",\"phase_num\":\"2\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 2: Codex plan review"
         id: codex_plan
@@ -400,10 +400,11 @@ jobs:
 
             # Request approval via bot
             JSON_BODY=$(jq -n \
+              --arg repo "${{ github.repository }}" \
               --arg branch "$DEV_BRANCH" \
               --arg issue_number "$ISSUE_NUMBER" \
               --arg plan_summary "$SUMMARY" \
-              '{branch: $branch, issue_number: $issue_number, plan_summary: $plan_summary}')
+              '{repo: $repo, branch: $branch, issue_number: $issue_number, plan_summary: $plan_summary}')
 
             curl -s -X POST "$BOT_NOTIFY_URL/ci/request-approval" \
               -H "Content-Type: application/json" \
@@ -415,7 +416,7 @@ jobs:
             DECISION=""
             for i in $(seq 1 30); do
               sleep 30
-              RESULT=$(curl -s "$BOT_NOTIFY_URL/ci/check-approval?branch=$DEV_BRANCH&issue_number=$ISSUE_NUMBER")
+              RESULT=$(curl -s "$BOT_NOTIFY_URL/ci/check-approval?repo=${{ github.repository }}&branch=$DEV_BRANCH&issue_number=$ISSUE_NUMBER")
               STATUS=$(echo "$RESULT" | jq -r '.status')
 
               if [ "$STATUS" = "approved" ]; then
@@ -500,7 +501,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Реализация\",\"phase_num\":\"3\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Реализация\",\"phase_num\":\"3\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 3: Implement (Opus)"
         id: implement
@@ -692,7 +693,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Codex код ревью\",\"phase_num\":\"4\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Codex код ревью\",\"phase_num\":\"4\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 4: Codex code review"
         id: codex_code
@@ -859,7 +860,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Тестирование\",\"phase_num\":\"5\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Тестирование\",\"phase_num\":\"5\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: "Phase 5a: Run smoke tests"
         id: e2e_smoke
@@ -1051,7 +1052,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"opus_unavailable\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"opus_unavailable\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
       - name: "Claude Code — Sonnet (fallback)"
         id: sonnet
@@ -1134,7 +1135,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Финализация\",\"phase_num\":\"6\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"phase\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"phase\":\"Финализация\",\"phase_num\":\"6\",\"silent\":true,\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"\"}"
 
       - name: Verify actual push
         if: always()
@@ -1440,7 +1441,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"claude_failed\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
       - name: "Notify: changes pushed"
         if: always() && steps.verify.outputs.pushed == 'true' && steps.dev.outputs.branch != ''
@@ -1470,7 +1471,7 @@ jobs:
 
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"merged\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
+            -d "{\"repo\":\"${{ github.repository }}\",\"event\":\"merged\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\"}"
 
       - name: Close issue
         if: always() && steps.verify.outputs.pushed == 'true'
