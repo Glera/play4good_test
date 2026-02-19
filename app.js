@@ -774,9 +774,8 @@ function removePair(a, b) {
     // Amplitude: must guarantee visible scatter in ALL cases
     // Base: proportional to tile width
     // Minimum: at least 30% of vertical distance so stacked tiles visibly fly apart
-    // Clamped by maxAmplitude so tiles stay on-screen on small devices (320px)
-    const boardSpan = Math.min(boardW, boardH);
-    const maxAmplitude = boardSpan * 0.35;
+    // Clamped by maxAmplitude (4 tile widths) so tiles stay on-screen
+    const maxAmplitude = tileW * 4;
     const absDy = Math.abs(dy);
     const closeness = Math.max(0, 1 - dist / (tileW * 6));
     const baseAmplitude = Math.min(Math.max(tileW * 2.0, absDy * 0.3), maxAmplitude);
