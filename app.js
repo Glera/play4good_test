@@ -771,16 +771,8 @@ function removePair(a, b) {
     const scatterDirA = aIsLeft ? -1 : 1;
     const scatterDirB = -scatterDirA;
 
-    // Amplitude: must guarantee visible scatter in ALL cases
-    // Base: proportional to tile width
-    // Minimum: at least 30% of vertical distance so stacked tiles visibly fly apart
-    // Clamped by maxAmplitude (4 tile widths) so tiles stay on-screen
-    const maxAmplitude = tileW * 4;
-    const absDy = Math.abs(dy);
-    const closeness = Math.max(0, 1 - dist / (tileW * 6));
-    const baseAmplitude = Math.min(Math.max(tileW * 2.0, absDy * 0.3), maxAmplitude);
-    const boost = 1 + closeness * 1.5;
-    const amplitude = Math.min(baseAmplitude * boost, maxAmplitude);
+    // Amplitude: fixed 10% of board width — independent of tile size / zoom level
+    const amplitude = boardW * 0.10;
 
     // Compute tContact from geometry: remove tiles when their edges would just touch
     // Use scale at t=0.98 (nominal contact time), not t=1, for accurate gap estimate
