@@ -771,17 +771,22 @@ function removePair(a, b) {
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
-    // Amplitude: dynamic based on distance and orientation
-    // Close tiles need bigger arcs to fly around each other
+    // Scatter direction: ALWAYS HORIZONTAL
+    // This guarantees Y movement is purely linear (50% vertical distance at midpoint)
+    // Tile A scatters to its own side, tile B to the opposite side
+    const scatterDirA = aIsLeft ? -1 : 1;
+    const scatterDirB = -scatterDirA;
+
+    // Amplitude: must guarantee visible scatter in ALL cases
+    // Base: proportional to tile width
+    // Minimum: at least 30% of vertical distance so stacked tiles visibly fly apart
+    const absDy = Math.abs(dy);
     const closeness = Math.max(0, 1 - dist / (tileW * 6));
-    // Vertically stacked tiles (similar X) need extra-wide arcs
-    // |perpX| ≈ 1 when tiles are above/below each other
-    const verticalness = Math.abs(perpX);
-    const boost = 1 + closeness * (1 + verticalness);
-    // boost range: 1.0 (far apart) to 3.0 (close + vertically stacked)
+    const baseAmplitude = Math.max(tileW * 1.0, absDy * 0.3);
+    const boost = 1 + closeness * 1.5;
     const boardSpan = Math.min(boardW, boardH);
     const maxAmplitude = boardSpan * 0.35;
-    const amplitude = Math.min(tileW * 1.2 * boost, maxAmplitude);
+    const amplitude = Math.min(baseAmplitude * boost, maxAmplitude);
 
     // Duration scales with distance for smooth arc animation
     const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
@@ -817,9 +822,10 @@ function removePair(a, b) {
     // not after it finishes
     updateTileStates();
 
-    // Tile A scatters in +perpendicular direction, tile B in -perpendicular
-    animateArc(elA, ax, ay, endAx, endAy, amplitude, perpX, perpY, duration, onContact);
-    animateArc(elB, bx, by, endBx, endBy, -amplitude, perpX, perpY, duration, onContact);
+    // Scatter is ALWAYS HORIZONTAL (perpY=0) — Y is purely linear → 50% at midpoint guaranteed
+    // Tile A scatters to its side, tile B to the opposite side
+    animateArc(elA, ax, ay, endAx, endAy, amplitude, scatterDirA, 0, duration, onContact);
+    animateArc(elB, bx, by, endBx, endBy, amplitude, scatterDirB, 0, duration, onContact);
 }
 
 // Update UI counters
