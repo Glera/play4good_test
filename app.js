@@ -776,7 +776,7 @@ function removePair(a, b) {
     // Minimum: at least 30% of vertical distance so stacked tiles visibly fly apart
     const absDy = Math.abs(dy);
     const closeness = Math.max(0, 1 - dist / (tileW * 6));
-    const baseAmplitude = Math.max(tileW * 1.0, absDy * 0.3);
+    const baseAmplitude = Math.max(tileW * 3.0, absDy * 0.3);
     const boost = 1 + closeness * 1.5;
     const boardSpan = Math.min(boardW, boardH);
     const maxAmplitude = boardSpan * 0.35;
