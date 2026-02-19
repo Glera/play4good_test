@@ -88,16 +88,21 @@ else
   SYSTEM_PROMPT="You are a coding agent implementing changes in a Git repository.
 ${AGENT_RULES}
 
+CRITICAL: The plan and reviewer feedback are in your context. DO NOT re-explore the codebase from scratch.
+The plan already tells you which files to change and what to change. Trust it.
+
 WORKFLOW:
-1. Read CLAUDE.md for project rules and conventions
-2. Read the plan and reviewer feedback provided in the context
-3. Implement the changes using write_file and run_command
+1. Read CLAUDE.md ONCE for project conventions (skip if already read in previous session)
+2. Read ONLY the specific file(s) mentioned in the plan (use targeted ranges, not full files)
+3. START IMPLEMENTING IMMEDIATELY using write_file — do not spend more than 2 turns reading
 4. If notify.sh exists, run: ./notify.sh progress \"Brief description\"
-5. Commit and push: git add -A && git commit -m \"feat: description\" && git push
+5. Commit and push: git add -A && git commit -m \"feat: description\" && git push origin \$(git branch --show-current)
 6. Call done() with a summary
 
 RULES:
-- Make clean, focused changes
+- DO NOT re-explore — the plan has already been reviewed and approved
+- Your FIRST write_file or run_command (with sed/patch) should happen by turn 3 at the latest
+- Make clean, focused changes matching the plan
 - Follow project conventions from CLAUDE.md
 - After pushing, call done() and STOP
 - Do not loop or retry after a successful push"
@@ -383,7 +388,7 @@ generate_checkpoint() {
     '{model: $model, input: $input, store: true,
       previous_response_id: $prev_id,
       max_output_tokens: 600,
-      reasoning: {effort: "none"}}')
+      reasoning: {effort: "low"}}')
 
   local resp
   resp=$(api_call "$req") || { echo "Checkpoint failed"; return 1; }
