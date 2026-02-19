@@ -63,7 +63,16 @@ ESCALATED="false"
 # Fail-fast: track whether agent has written code (implement mode only)
 HAS_WRITTEN="false"
 
-echo "Config: model=$MODEL reasoning=$REASONING_EFFORT max_output=$MAX_OUTPUT turns/session=$SESSION_TURNS sessions=$MAX_SESSIONS cache=$CACHE_KEY profile=$PROFILE" >&2
+# --- Profile-dependent settings (implement mode only) ---
+if [ "$PROFILE" = "large" ]; then
+  IMPL_MAX_TOOL_CALLS=6
+  FAIL_FAST_TURN=5
+else
+  IMPL_MAX_TOOL_CALLS=3
+  FAIL_FAST_TURN=3
+fi
+
+echo "Config: model=$MODEL reasoning=$REASONING_EFFORT max_output=$MAX_OUTPUT turns/session=$SESSION_TURNS sessions=$MAX_SESSIONS cache=$CACHE_KEY profile=$PROFILE fail_fast=$FAIL_FAST_TURN" >&2
 
 # --- Agent rules (appended to system prompt — stable prefix for caching) ---
 AGENT_RULES="
@@ -114,15 +123,6 @@ RULES:
 - Follow project conventions from CLAUDE.md
 - After pushing, call done() and STOP
 - Do not loop or retry after a successful push"
-fi
-
-# --- Profile-dependent settings (implement mode only) ---
-if [ "$PROFILE" = "large" ]; then
-  IMPL_MAX_TOOL_CALLS=6
-  FAIL_FAST_TURN=5
-else
-  IMPL_MAX_TOOL_CALLS=3
-  FAIL_FAST_TURN=3
 fi
 
 # --- Tools definition (mode-dependent) ---
