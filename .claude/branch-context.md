@@ -105,3 +105,95 @@ Performance tests: PASSED
  3 files changed, 65 insertions(+), 8 deletions(-)
 ```
 
+
+---
+
+## #159 — хочу чтобы минимальная величина разлета костей в сторону была 3 ширины кости, ни (2026-02-19)
+Commit: 07f5283
+Files: app.js
+
+### Plan
+# Plan: Issue #159 — Минимальный разлёт костей = 3 ширины кости
+
+## Проблема
+В `removePair()` (app.js:779) минимальная амплитуда бокового разлёта — `tileW * 1.0`. Разработчик хочет, чтобы кости всегда разлетались минимум на 3 ширины кости в сторону.
+
+## Файлы для изменения
+
+### `app.js` — функция `removePair()`, строка 779
+Единственное изменение:
+```js
+// Было:
+const baseAmplitude = Math.max(tileW * 1.0, absDy * 0.3);
+// Станет:
+const baseAmplitude = Math.max(tileW * 3.0, absDy * 0.3);
+```
+Это гарантирует, что латеральное смещение (amplitude в `animateArc`) никогда не будет меньше 3 ширин кости.
+
+## Краевые случаи
+- **Маленький экран (320px):** tileW ~30px, 3×30=90px. `maxAmplitude = boardSpan * 0.35 ≈ 112px` — вмещается. Если экран совсем узкий и maxAmplitude < tileW*3, кости будут обрезаны до maxAmplitude — это ОК, иначе они вылетят за пределы доски.
+- **Близкие кости (closeness ~1, boost=2.5):** 3×tileW×2.5 = 7.5×tileW, но cap на `boardSpan * 0.35` предотвратит вылет за границу.
+- **Стопка костей (dy=0, dist≈0):** absDy*0.3 = 0, поэтому минимум tileW*3 сработает — кости разлетятся видимо в стороны.
+- **Кости далеко друг от друга:** closeness ≈ 0, boost ≈ 1, amplitude = tileW*3 минимум — хороший видимый разлёт.
+
+## Тестирование
+- `npx playwright test` — smoke + performance тесты
+- Визуально: убрать пару соседних костей и пару далёких — в обоих случаях разлёт должен быть не менее ~3 ширин кости
+- Проверить на 320px и 1024px
+
+### Review feedback
+Plan review:
+✅ План выглядит хорошо. Обрати внимание на:
+- Если `maxAmplitude` < `tileW*3`, фактический минимум не гарантируется — стоит упомянуть/проверить влияние на ожидания дизайна.
+- Риск регрессии: сильный разлёт на узких экранах может привести к визуальному обрезанию/перекрытию вне доски (проверить safe area).
+- Не описано, нужны ли обновления визуальных тестов/скриншотов (если есть).
+- Убедиться, что `tileW` корректно рассчитывается для разных масштабов/зумов (иначе 3× может быть слишком).
+
+Code review (false):
+1) В DEVLOG.md изменён статус у задачи #158 на «⭐ забрать в main» — это побочное изменение не по тикету #159, риск путаницы в cherry-pick.  
+2) Увеличение минимальной амплитуды до `tileW*3` может привести к чрезмерному разлёту на маленьких полях/экранах; стоит проверить, что итоговая амплитуда всё ещё ограничивается `maxAmplitude`.  
+3) Нет упоминания о проверке поведения на 320px ширине/мобайле — при большом разлёте возможен вылет костей за экран.  
+
+В остальном изменение точечное.
+
+### Corrections after review
+Fix agent messages: 
+Commits after review: 4249b33 docs: update DEVLOG for #159
+07f5283 fix: address code review feedback (#159)
+56f59ae feat: минимальный разлёт костей = 3 ширины кости (#159)
+1df4d5c Mark #158 for cherry-pick to main
+
+### Lessons learned (agent-written)
+# Agent Lessons — Issue #159
+
+## Decisions
+- **Single constant change**: Only changed `tileW * 1.0` → `tileW * 3.0` in `baseAmplitude` calculation. The existing `maxAmplitude = boardSpan * 0.35` cap naturally prevents tiles from flying off-screen on narrow devices, so no additional safeguards needed.
+- **Reviewer concern about maxAmplitude < tileW*3**: Acknowledged but accepted — on very narrow screens the cap will reduce the effective minimum, which is the correct behavior (prefer staying on-screen over guaranteed 3x distance).
+
+## Failed approaches
+- First `git push` was rejected because remote had new commits (branch context update from prior CI run). Fixed with `git pull --rebase`.
+
+## Errors fixed
+- None — all 30 tests passed on first run.
+
+## Developer preferences
+- Same workflow as #158: notify → implement → test → commit → DEVLOG → amend → push
+- DEVLOG entries go at the top, newest first
+
+## Warnings for next run
+- DEVLOG.md has a duplicate #158 entry (lines 22+24) — pre-existing from #158, left as-is.
+- Remote branch may have CI-generated commits (branch context updates) — always pull before push.
+
+### Test results
+```
+Smoke tests: PASSED
+Performance tests: PASSED
+```
+
+### Diff summary
+```
+ DEVLOG.md | 36 ++++++++++++++++++++++++++++++++++++
+ app.js    |  7 ++++---
+ 2 files changed, 40 insertions(+), 3 deletions(-)
+```
+
