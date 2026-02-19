@@ -12,7 +12,7 @@
 #   REPO_CACHE_KEY       — prompt cache key (default: repo:$GITHUB_REPOSITORY:agent:v1)
 #   CODEX_PROFILE        — small|large (default: small)
 #                          small: max_tool_calls=3, fail-fast turn 5
-#                          large: max_tool_calls=6, fail-fast turn 8
+#                          large: max_tool_calls=6, no fail-fast (session limit only)
 #
 # Token optimization:
 #   - reasoning.effort: low by default, auto-escalates to medium on build failure
@@ -77,7 +77,7 @@ HAS_WRITTEN="false"
 # so effective reading budget = FAIL_FAST_TURN - 2
 if [ "$PROFILE" = "large" ]; then
   IMPL_MAX_TOOL_CALLS=6
-  FAIL_FAST_TURN=8
+  FAIL_FAST_TURN=0   # disabled — session limit (12 turns) is the safety net
 else
   IMPL_MAX_TOOL_CALLS=3
   FAIL_FAST_TURN=5
@@ -531,8 +531,8 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
     fi
 
     # Fail-fast: in implement mode, if turn N completed with no writes → abort
-    # Threshold depends on profile: small=3, large=5
-    if [ "$MODE" = "implement" ] && [ "$TURN" -ge "$FAIL_FAST_TURN" ] && [ "$HAS_WRITTEN" = "false" ]; then
+    # Threshold depends on profile: small=5, large=0 (disabled)
+    if [ "$MODE" = "implement" ] && [ "$FAIL_FAST_TURN" -gt 0 ] && [ "$TURN" -ge "$FAIL_FAST_TURN" ] && [ "$HAS_WRITTEN" = "false" ]; then
       echo "  [fail-fast] Turn $TURN/$FAIL_FAST_TURN with no write_file/patch — aborting (profile=$PROFILE)" >&2
       echo "Agent aborted: spent $TURN turns reading without writing code (profile=$PROFILE)" >&2
       COMPLETED=true
