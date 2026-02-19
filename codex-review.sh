@@ -1,12 +1,18 @@
 #!/bin/bash
-# codex-review.sh — Call Codex 5.2 for plan/code review
+# codex-review.sh — Call OpenAI for plan/code review (single-shot, no tools)
 # Usage: ./codex-review.sh plan|code <file>
 # Requires: OPENAI_API_KEY env var, jq installed
+#
+# Env vars (optional):
+#   CODEX_MODEL    — model id (default: gpt-5.2-codex)
+#   CODEX_REASONING — reasoning effort (default: low)
 
 set -euo pipefail
 
 MODE="${1:-plan}"
 FILE="${2:-/dev/stdin}"
+MODEL="${CODEX_MODEL:-gpt-5.2-codex}"
+REASONING="${CODEX_REASONING:-low}"
 
 if [ ! -f "$FILE" ] && [ "$FILE" != "/dev/stdin" ]; then
   echo "File not found: $FILE"
@@ -57,18 +63,26 @@ fi
 RESPONSE=$(curl -s -w "\n%{http_code}" https://api.openai.com/v1/responses \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
-  -d "$(jq -n --arg input "$PROMPT" '{
-    model: "gpt-5.2-codex",
-    input: $input
+  -d "$(jq -n --arg input "$PROMPT" --arg model "$MODEL" --arg effort "$REASONING" '{
+    model: $model,
+    input: $input,
+    max_output_tokens: 800,
+    reasoning: {effort: $effort}
   }')")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" != "200" ]; then
-  echo "Codex API error (HTTP $HTTP_CODE). Skipping review."
+  echo "API error (HTTP $HTTP_CODE). Skipping review."
   exit 0
 fi
+
+# Log usage
+INPUT_TOKENS=$(echo "$BODY" | jq '.usage.input_tokens // 0')
+OUTPUT_TOKENS=$(echo "$BODY" | jq '.usage.output_tokens // 0')
+REASONING_TOKENS=$(echo "$BODY" | jq '.usage.output_tokens_details.reasoning_tokens // 0')
+echo "Review usage: model=$MODEL in=$INPUT_TOKENS out=$OUTPUT_TOKENS reasoning=$REASONING_TOKENS" >&2
 
 # Extract text — try multiple response formats
 TEXT=$(echo "$BODY" | jq -r '
