@@ -657,9 +657,13 @@ function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, dur
         // Longitudinal: linear — constant speed, no fast/slow phases
         const tLong = t;
 
-        // Lateral: sin(πt) — symmetric bell peaking at t=0.5
-        // Equal scatter and converge phases
-        const tLat = Math.sin(Math.PI * t);
+        // Lateral: sin(πt) with quadratic fade-out in last 15%
+        // Without fade, sin(π·0.94) = 0.187 → tiles arrive with 19% lateral offset
+        // → inconsistent meeting angles (corners vs faces depending on direction)
+        // Fade ensures lateral ≈ 0 at contact → always clean face-to-face meeting
+        const sinVal = Math.sin(Math.PI * t);
+        const fade = t < 0.85 ? 1 : (1 - t) / 0.15;
+        const tLat = sinVal * fade * fade;
 
         // Position: uniform forward motion + lateral arc overlay
         const x = startX + (endX - startX) * tLong + perpX * amplitude * tLat;
