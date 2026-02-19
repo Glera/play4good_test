@@ -14,7 +14,7 @@
 # Token optimization:
 #   - reasoning.effort: low by default, auto-escalates to medium on build failure
 #   - max_output_tokens: 1400 (tight), auto-reduced if reasoning ratio too high
-#   - max_tool_calls: 6 per turn, parallel_tool_calls: false
+#   - max_tool_calls: 6 (plan) / 3 (implement), parallel_tool_calls: false
 #   - truncation: auto (safety net for long conversations)
 #   - prompt caching: 24h retention for stable system+tools prefix
 #   - Session splitting: 12 turns max, then checkpoint-summary + new session
@@ -54,6 +54,9 @@ HIGH_RATIO_COUNT=0
 
 # Reasoning escalation: low → medium once on build/test failure
 ESCALATED="false"
+
+# Fail-fast: track whether agent has written code (implement mode only)
+HAS_WRITTEN="false"
 
 echo "Config: model=$MODEL reasoning=$REASONING_EFFORT max_output=$MAX_OUTPUT turns/session=$SESSION_TURNS sessions=$MAX_SESSIONS cache=$CACHE_KEY" >&2
 
@@ -96,7 +99,7 @@ WORKFLOW:
 2. Read ONLY the specific file(s) mentioned in the plan (use targeted ranges, not full files)
 3. START IMPLEMENTING IMMEDIATELY using write_file — do not spend more than 2 turns reading
 4. If notify.sh exists, run: ./notify.sh progress \"Brief description\"
-5. Commit and push: git add -A && git commit -m \"feat: description\" && git push origin \$(git branch --show-current)
+5. Commit and push: git add -A && git commit -m \"feat: description\" && git push origin \$(git rev-parse --abbrev-ref HEAD)
 6. Call done() with a summary
 
 RULES:
@@ -108,74 +111,27 @@ RULES:
 - Do not loop or retry after a successful push"
 fi
 
-# --- Tools definition ---
-TOOLS=$(cat << 'TOOLS_EOF'
-[
-  {
-    "type": "function",
-    "name": "read_file",
-    "description": "Read contents of a file. Returns up to 15KB. For large files, use run_command with head/tail/sed to read specific sections.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "path": {"type": "string", "description": "File path relative to repo root"}
-      },
-      "required": ["path"]
-    }
-  },
-  {
-    "type": "function",
-    "name": "write_file",
-    "description": "Write or overwrite a file with the given content. Creates parent directories if needed.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "path": {"type": "string", "description": "File path relative to repo root"},
-        "content": {"type": "string", "description": "Full file content"}
-      },
-      "required": ["path", "content"]
-    }
-  },
-  {
-    "type": "function",
-    "name": "list_files",
-    "description": "List files in a directory (max depth 3, max 100 results).",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "directory": {"type": "string", "description": "Directory path"},
-        "pattern": {"type": "string", "description": "Glob pattern (default: *)"}
-      },
-      "required": ["directory"]
-    }
-  },
-  {
-    "type": "function",
-    "name": "run_command",
-    "description": "Run a shell command. Output truncated to 5KB. Timeout: 60s. For verbose output, pipe through tail -50 or grep.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "command": {"type": "string", "description": "Shell command to execute"}
-      },
-      "required": ["command"]
-    }
-  },
-  {
-    "type": "function",
-    "name": "done",
-    "description": "Signal that the task is complete. Call this when finished.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "summary": {"type": "string", "description": "Brief summary of what was done"}
-      },
-      "required": ["summary"]
-    }
-  }
-]
-TOOLS_EOF
-)
+# --- Tools definition (mode-dependent) ---
+# Plan mode: all 5 tools, max_tool_calls 6 (exploration needed)
+# Implement mode: 4 tools (no list_files), max_tool_calls 3 (focused writing)
+TOOLS_COMMON='[
+  {"type":"function","name":"read_file","description":"Read contents of a file. Returns up to 15KB. For large files, use run_command with head/tail/sed to read specific sections.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path relative to repo root"}},"required":["path"]}},
+  {"type":"function","name":"write_file","description":"Write or overwrite a file with the given content. Creates parent directories if needed.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path relative to repo root"},"content":{"type":"string","description":"Full file content"}},"required":["path","content"]}},
+  {"type":"function","name":"run_command","description":"Run a shell command. Output truncated to 5KB. Timeout: 60s. For verbose output, pipe through tail -50 or grep.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"}},"required":["command"]}},
+  {"type":"function","name":"done","description":"Signal that the task is complete. Call this when finished.","parameters":{"type":"object","properties":{"summary":{"type":"string","description":"Brief summary of what was done"}},"required":["summary"]}}
+]'
+
+TOOL_LIST_FILES='{"type":"function","name":"list_files","description":"List files in a directory (max depth 3, max 100 results).","parameters":{"type":"object","properties":{"directory":{"type":"string","description":"Directory path"},"pattern":{"type":"string","description":"Glob pattern (default: *)"}},"required":["directory"]}}'
+
+if [ "$MODE" = "plan" ]; then
+  # Plan: all tools + list_files, 6 calls/turn
+  TOOLS=$(echo "$TOOLS_COMMON" | jq --argjson lf "$TOOL_LIST_FILES" '. + [$lf]')
+  MAX_TOOL_CALLS=6
+else
+  # Implement: no list_files (plan already identified files), 3 calls/turn
+  TOOLS="$TOOLS_COMMON"
+  MAX_TOOL_CALLS=3
+fi
 
 # --- Execute a tool call ---
 execute_tool() {
@@ -201,6 +157,7 @@ execute_tool() {
       printf '%s' "$content" > "$file_path"
       local bytes
       bytes=$(wc -c < "$file_path" | tr -d ' ')
+      HAS_WRITTEN="true"
       echo "OK: wrote ${bytes} bytes to $file_path"
       ;;
 
@@ -219,6 +176,10 @@ execute_tool() {
       local cmd
       cmd=$(echo "$args_json" | jq -r '.command')
       echo "  $ $cmd" >&2
+      # Track writing commands (sed -i, patch, tee, git commit)
+      if echo "$cmd" | grep -qE 'sed -i|patch |tee |git (add|commit|push)'; then
+        HAS_WRITTEN="true"
+      fi
       local result
       set +e
       result=$(timeout 60 bash -c "$cmd" 2>&1 | head -c 5000)
@@ -306,6 +267,7 @@ build_request() {
     --arg model "$MODEL"
     --arg effort "$REASONING_EFFORT"
     --argjson max_out "$MAX_OUTPUT"
+    --argjson max_tc "$MAX_TOOL_CALLS"
     --arg cache_key "$CACHE_KEY"
   )
 
@@ -313,7 +275,7 @@ build_request() {
     jq -n "${base_args[@]}" \
       '{model: $model, input: $input, tools: $tools, store: true,
         max_output_tokens: $max_out,
-        max_tool_calls: 6,
+        max_tool_calls: $max_tc,
         parallel_tool_calls: false,
         truncation: "auto",
         reasoning: {effort: $effort},
@@ -324,7 +286,7 @@ build_request() {
       '{model: $model, input: $input, tools: $tools, store: true,
         previous_response_id: $prev_id,
         max_output_tokens: $max_out,
-        max_tool_calls: 6,
+        max_tool_calls: $max_tc,
         parallel_tool_calls: false,
         truncation: "auto",
         reasoning: {effort: $effort},
@@ -495,6 +457,14 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
     if [ "$HAS_FUNCTION_CALLS" = "false" ]; then
       FINAL_TEXT=$(echo "$OUTPUT" | jq -r '[.[] | select(.type == "message") | .content[]? | select(.type == "output_text") | .text] | join("\n")' 2>/dev/null || echo "Agent completed")
       echo "$FINAL_TEXT"
+      COMPLETED=true
+      break
+    fi
+
+    # Fail-fast: in implement mode, if turn 3 completed with no writes → abort
+    if [ "$MODE" = "implement" ] && [ "$TURN" -ge 3 ] && [ "$HAS_WRITTEN" = "false" ]; then
+      echo "  [fail-fast] Turn $TURN with no write_file/patch — aborting (implement mode)" >&2
+      echo "Agent aborted: spent $TURN turns reading without writing code" >&2
       COMPLETED=true
       break
     fi
