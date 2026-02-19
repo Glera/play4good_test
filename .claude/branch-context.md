@@ -302,3 +302,85 @@ Performance tests: PASSED
  3 files changed, 93 insertions(+), 37 deletions(-)
 ```
 
+
+---
+
+## #161 — уменьше минимальную ширину разлета до двойной ширины кости, вместо тройной (2026-02-19)
+Commit: 2972362
+Files: app.js
+
+### Plan
+# Plan: Issue #161 — Уменьшить минимальную ширину разлёта до 2× ширины кости
+
+## Проблема
+В Issue #159 минимальная амплитуда бокового разлёта была увеличена с `tileW * 1.0` до `tileW * 3.0`. Разработчик считает, что 3× — слишком много, и хочет уменьшить до 2×.
+
+## Файлы для изменения
+
+### `app.js` — строка 782
+Единственное изменение:
+```js
+// Было:
+const baseAmplitude = Math.min(Math.max(tileW * 3.0, absDy * 0.3), maxAmplitude);
+// Станет:
+const baseAmplitude = Math.min(Math.max(tileW * 2.0, absDy * 0.3), maxAmplitude);
+```
+
+## Краевые случаи
+- **Маленький экран (320px):** tileW ~30px → 2×30=60px. maxAmplitude = boardSpan*0.35 ≈ 112px — вмещается с запасом.
+- **Близкие кости (boost до 2.5):** 2×tileW×2.5 = 5×tileW, cap на maxAmplitude предотвращает вылет за границу.
+- **Стопка (dy=0):** absDy*0.3=0, минимум 2×tileW сработает — кости всё равно разлетятся видимо.
+- **tContact формула (строка 792-793):** Не зависит от baseAmplitude — вычисляется из sideGap. Без изменений.
+
+## Тестирование
+- `npx playwright test` — smoke + performance тесты
+- Визуальная проверка: разлёт должен быть заметным, но меньше чем при 3×
+
+### Review feedback
+Plan review:
+✅ План выглядит хорошо.  
+На что обратить внимание:  
+1) Убедиться, что это единственное место, где задаётся минимальная амплитуда (нет других констант/магических чисел).  
+2) После правки проверить визуально на крайних разрешениях и при больших boost, чтобы не было касаний границ.  
+3) Не забыть обновить DEVLOG.md по workflow.
+
+Code review (true):
+✅ Код выглядит хорошо.  
+Обратить внимание:
+1) Уменьшение min разлёта может вернуть наслоение при плотных раскладах/малых `tileW` — стоит визуально проверить на разных размерах поля.  
+2) Убедиться, что изменение не ухудшает анимацию на крайних значениях `maxAmplitude` (большие доски).
+
+### Lessons learned (agent-written)
+# Agent Lessons — Issue #161
+
+## Decisions
+- **Single constant change 3.0 → 2.0**: Only one occurrence of `tileW * 3.0` in baseAmplitude (line 782). Confirmed via grep — no other constants or magic numbers for this minimum amplitude.
+- **No additional safeguards needed**: `maxAmplitude = boardSpan * 0.35` cap still prevents off-screen tiles. On 320px: 2×30=60px vs maxAmplitude≈112px — well within bounds.
+
+## Failed approaches
+- None — trivial single-line change.
+
+## Errors fixed
+- None — all 30 tests passed on first run.
+
+## Developer preferences
+- Same workflow: notify → implement → test → commit → DEVLOG → amend → push
+- Developer iterates on animation parameters frequently (#159: 1→3, #161: 3→2) — expect more tuning.
+
+## Warnings for next run
+- Remote branch was up to date this time, but previous runs had CI-generated commits — always pull before push.
+- `baseAmplitude` interacts with `boost` (up to 2.5× for close tiles) and `maxAmplitude` cap — changing the multiplier affects the effective range.
+
+### Test results
+```
+Smoke tests: PASSED
+Performance tests: PASSED
+```
+
+### Diff summary
+```
+ DEVLOG.md | 36 ++++++++++++++++++++++++++++++++++++
+ app.js    |  2 +-
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+```
+
