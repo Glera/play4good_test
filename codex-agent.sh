@@ -11,8 +11,8 @@
 #   CODEX_MAX_SESSIONS   — max session restarts via checkpoint (default: 3)
 #   REPO_CACHE_KEY       — prompt cache key (default: repo:$GITHUB_REPOSITORY:agent:v1)
 #   CODEX_PROFILE        — small|large (default: small)
-#                          small: max_tool_calls=3, fail-fast turn 3
-#                          large: max_tool_calls=6, fail-fast turn 5
+#                          small: max_tool_calls=3, fail-fast turn 5
+#                          large: max_tool_calls=6, fail-fast turn 8
 #
 # Token optimization:
 #   - reasoning.effort: low by default, auto-escalates to medium on build failure
@@ -73,12 +73,14 @@ ESCALATED="false"
 HAS_WRITTEN="false"
 
 # --- Profile-dependent settings (implement mode only) ---
+# Note: first ~2 turns are overhead (read CLAUDE.md + notify.sh),
+# so effective reading budget = FAIL_FAST_TURN - 2
 if [ "$PROFILE" = "large" ]; then
   IMPL_MAX_TOOL_CALLS=6
-  FAIL_FAST_TURN=5
+  FAIL_FAST_TURN=8
 else
   IMPL_MAX_TOOL_CALLS=3
-  FAIL_FAST_TURN=3
+  FAIL_FAST_TURN=5
 fi
 
 echo "Config: model=$MODEL reasoning=$REASONING_EFFORT max_output=$MAX_OUTPUT turns/session=$SESSION_TURNS sessions=$MAX_SESSIONS cache=$CACHE_KEY profile=$PROFILE fail_fast=$FAIL_FAST_TURN" >&2
@@ -119,15 +121,15 @@ The plan already tells you which files to change and what to change. Trust it.
 
 WORKFLOW:
 1. Read CLAUDE.md ONCE for project conventions (skip if already read in previous session)
-2. Read ONLY the specific file(s) mentioned in the plan (use targeted ranges, not full files)
-3. START IMPLEMENTING IMMEDIATELY using write_file — do not spend more than 2 turns reading
-4. If notify.sh exists, run: ./notify.sh progress \"Brief description\"
+2. If notify.sh exists, run: ./notify.sh progress \"Brief description of your plan\"
+3. Read ONLY the specific file(s) mentioned in the plan (use targeted ranges, not full files)
+4. IMPLEMENT using write_file or run_command with apply_patch/sed
 5. Commit and push: git add -A && git commit -m \"feat: description\" && git push origin \$(git rev-parse --abbrev-ref HEAD)
 6. Call done() with a summary
 
 RULES:
-- DO NOT re-explore — the plan has already been reviewed and approved
-- Your FIRST write_file or run_command (with sed/patch) should happen by turn $FAIL_FAST_TURN at the latest
+- DO NOT re-explore the whole codebase — the plan tells you which files to change
+- Your FIRST write_file or apply_patch MUST happen by turn $FAIL_FAST_TURN at the latest — you will be terminated if you only read
 - Make clean, focused changes matching the plan
 - Follow project conventions from CLAUDE.md
 - After pushing, call done() and STOP
