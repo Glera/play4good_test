@@ -384,3 +384,75 @@ Performance tests: PASSED
  2 files changed, 37 insertions(+), 1 deletion(-)
 ```
 
+
+---
+
+## #162 — максимальный разлет давай установим как 4 ширины кости (2026-02-19)
+Commit: ea8ca98
+Files: app.js
+
+### Plan
+# Plan: Issue #162 — Максимальный разлёт = 4 ширины кости
+
+## Проблема
+Сейчас максимальная амплитуда разлёта (`maxAmplitude`) вычисляется как `boardSpan * 0.35` (35% меньшей стороны доски). Разработчик хочет, чтобы максимальный разлёт был ровно 4 ширины кости (`tileW * 4`).
+
+## Файлы для изменения
+
+### `app.js` — строка 779
+Единственное изменение:
+```js
+// Было:
+const maxAmplitude = boardSpan * 0.35;
+// Станет:
+const maxAmplitude = tileW * 4;
+```
+
+Переменная `boardSpan` (строка 778) станет неиспользуемой — удалить.
+
+## Что это затрагивает
+- `baseAmplitude` (строка 782): clamp через `Math.min(..., maxAmplitude)` — теперь cap = 4×tileW
+- `amplitude` (строка 784): `Math.min(baseAmplitude * boost, maxAmplitude)` — тот же cap
+- `tContact` формула (строки 786+): не зависит от maxAmplitude — без изменений
+
+## Краевые случаи
+- **Маленький экран (320px):** tileW ~30px → maxAmplitude = 120px. Раньше boardSpan*0.35 ≈ 112px — почти то же. ОК.
+- **Большой экран (1024px):** tileW ~60px → maxAmplitude = 240px. Раньше boardSpan*0.35 ≈ 179px — разлёт увеличится. Проверить визуально.
+- **Boost (до 2.5×):** baseAmplitude=2×tileW, с boost=2.5 → 5×tileW, cap на 4×tileW. ОК.
+- **baseAmplitude без boost:** 2×tileW < 4×tileW → не обрезается. ОК.
+- **absDy * 0.3 > 4×tileW:** при dy > 13×tileW (маловероятно) — обрежется до 4×tileW. ОК.
+
+## Тестирование
+- `npx playwright test` — smoke + performance тесты
+- Визуальная проверка: разлёт не должен превышать 4 ширины кости
+- Проверить на 320px и 1024px
+
+### Lessons learned (agent-written)
+# Agent Lessons — Issue #162
+
+## Decisions
+- **Single formula change**: Replaced `boardSpan * 0.35` with `tileW * 4` for maxAmplitude — directly ties the max spread to tile size as requested. Removed unused `boardSpan` variable.
+- **No additional safeguards needed**: The existing `Math.min(baseAmplitude * boost, maxAmplitude)` cap chain ensures tiles can't exceed the new 4×tileW limit.
+
+## Failed approaches
+- None — trivial single-line change, worked on first attempt.
+
+## Errors fixed
+- Playwright browsers were not installed in CI environment — ran `npx playwright install` and `npx playwright install-deps chromium` before tests.
+
+## Developer preferences
+- Developer iterates on animation parameters frequently (#159: min 1→3, #161: min 3→2, #162: max boardSpan*0.35→tileW*4) — expect more tuning.
+- Same workflow: notify → implement → test → commit → DEVLOG → amend → push.
+
+## Warnings for next run
+- Remote branch may have CI-generated commits (branch context updates) — always `git pull --rebase` before push.
+- `baseAmplitude` uses `tileW * 2.0` as minimum (#161), now capped at `tileW * 4` — the effective amplitude range is [2×tileW, 4×tileW] before boost.
+- With boost (up to 2.5×), amplitude can reach 5×tileW but gets capped at 4×tileW.
+
+### Diff summary
+```
+ DEVLOG.md | 38 ++++++++++++++++++++++++++++++++++++--
+ app.js    |  5 ++---
+ 2 files changed, 38 insertions(+), 5 deletions(-)
+```
+
