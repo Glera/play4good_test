@@ -686,10 +686,13 @@ function calcDirection(dx, dy, dist) {
 // Compute a scatter control point (ctrl1): tile flies AWAY from partner
 // sign: +1 for tile A, -1 for tile B (opposite perpendicular directions)
 // Scale scatter by tileH/tileW ratio on Y-axis to avoid overlap with non-square tiles
-function calcScatterCtrl(cx, cy, meetY, perpX, perpY, scatterDist, sign, tileW, tileH) {
+function calcScatterCtrl(cx, cy, nx, ny, perpX, perpY, scatterDist, sign, tileW, tileH) {
     const yScale = tileH / tileW;
-    const x = cx + sign * perpX * scatterDist - tileW / 2;
-    const y = cy + sign * perpY * scatterDist * yScale + (meetY - cy) * 0.1 - tileH / 2;
+    const sideDist = Math.min(tileW * 0.6, scatterDist * 0.35);
+    const awayX = cx - sign * nx * scatterDist;
+    const awayY = cy - sign * ny * scatterDist;
+    const x = awayX + sign * perpX * sideDist - tileW / 2;
+    const y = awayY + sign * perpY * sideDist * yScale - tileH / 2;
     return [x, y];
 }
 
@@ -788,30 +791,31 @@ function removePair(a, b) {
     // Direction & perpendicular vectors (with explicit guard for coincident tiles)
     const { nx, ny, perpX, perpY } = calcDirection(dx, dy, dist);
 
-    // End positions: tiles meet nearly touching along the A→B axis
-    // Use tileW for X-component and tileH for Y-component to avoid overlap with non-square tiles
-    const endGapX = tileW * 0.12;
-    const endGapY = tileH * 0.12;
-    const endAx = meetX - nx * endGapX - tileW / 2;
-    const endAy = meetY - ny * endGapY - tileH / 2;
-    const endBx = meetX + nx * endGapX - tileW / 2;
-    const endBy = meetY + ny * endGapY - tileH / 2;
+    // End positions: tiles meet with their bounds just touching along the A→B axis
+    // Compute the half-extent of a tile in the movement direction.
+    const halfExtent = (Math.abs(nx) * tileW + Math.abs(ny) * tileH) / 2;
+    const contactDist = Math.max(halfExtent * 0.98, dist / 2);
+    const endAx = meetX - nx * contactDist - tileW / 2;
+    const endAy = meetY - ny * contactDist - tileH / 2;
+    const endBx = meetX + nx * contactDist - tileW / 2;
+    const endBy = meetY + ny * contactDist - tileH / 2;
 
     // Board layout dimensions (pre-transform)
     const boardW = parseFloat(boardEl.style.width) || boardEl.offsetWidth || 1;
     const boardH = parseFloat(boardEl.style.height) || boardEl.offsetHeight || 1;
 
     // Scatter distance: how far each tile flies outward from start
-    const safeDist = Math.max(dist, tileW);
     const boardSpan = Math.min(boardW, boardH);
     const maxScatter = boardSpan * 0.45;
-    const scatterDist = Math.min(Math.max(tileW * 3.4, safeDist * 1.7), maxScatter);
+    const minScatter = Math.max(tileW * 1.6, halfExtent * 1.2);
+    const idealScatter = Math.max(dist * 1.3, tileW * 2.2);
+    const scatterDist = Math.min(Math.max(minScatter, idealScatter), maxScatter);
 
     // Build control points: scatter (ctrl1) then converge (ctrl2)
     let ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By;
     let ctrl2Ax, ctrl2Ay, ctrl2Bx, ctrl2By;
-    [ctrl1Ax, ctrl1Ay] = calcScatterCtrl(aCx, aCy, meetY, perpX, perpY, scatterDist, +1, tileW, tileH);
-    [ctrl1Bx, ctrl1By] = calcScatterCtrl(bCx, bCy, meetY, perpX, perpY, scatterDist, -1, tileW, tileH);
+    [ctrl1Ax, ctrl1Ay] = calcScatterCtrl(aCx, aCy, nx, ny, perpX, perpY, scatterDist, +1, tileW, tileH);
+    [ctrl1Bx, ctrl1By] = calcScatterCtrl(bCx, bCy, nx, ny, perpX, perpY, scatterDist, -1, tileW, tileH);
     [ctrl2Ax, ctrl2Ay] = calcConvergeCtrl(meetX, meetY, perpX, perpY, +1, tileW, tileH);
     [ctrl2Bx, ctrl2By] = calcConvergeCtrl(meetX, meetY, perpX, perpY, -1, tileW, tileH);
 
