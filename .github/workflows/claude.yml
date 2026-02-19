@@ -53,8 +53,9 @@ jobs:
             core.setOutput('testing', labels.includes('ci:testing') ? 'true' : 'false');
             core.setOutput('approve', labels.includes('ci:approve') ? 'true' : 'false');
             core.setOutput('codex_impl', labels.includes('ci:codex-impl') ? 'true' : 'false');
+            core.setOutput('large_profile', labels.includes('ci:large') ? 'true' : 'false');
 
-            console.log(`CI options: multi_agent=${labels.includes('ci:multi-agent')}, testing=${labels.includes('ci:testing')}, approve=${labels.includes('ci:approve')}, codex_impl=${labels.includes('ci:codex-impl')}`);
+            console.log(`CI options: multi_agent=${labels.includes('ci:multi-agent')}, testing=${labels.includes('ci:testing')}, approve=${labels.includes('ci:approve')}, codex_impl=${labels.includes('ci:codex-impl')}, large=${labels.includes('ci:large')}`);
 
       - uses: actions/checkout@v4
         with:
@@ -135,7 +136,7 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.BOT_WEBHOOK_URL }}/github/notify" \
             -H "Content-Type: application/json" \
-            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\",\"options\":{\"multi_agent\":\"${{ steps.dev.outputs.multi_agent }}\",\"testing\":\"${{ steps.dev.outputs.testing }}\",\"approve\":\"${{ steps.dev.outputs.approve }}\",\"codex_impl\":\"${{ steps.dev.outputs.codex_impl }}\"}}"
+            -d "{\"event\":\"claude_started\",\"branch\":\"${{ steps.dev.outputs.branch }}\",\"issue_number\":\"${{ steps.dev.outputs.issue_number }}\",\"issue_title\":\"${{ steps.dev.outputs.issue_title }}\",\"options\":{\"multi_agent\":\"${{ steps.dev.outputs.multi_agent }}\",\"testing\":\"${{ steps.dev.outputs.testing }}\",\"approve\":\"${{ steps.dev.outputs.approve }}\",\"codex_impl\":\"${{ steps.dev.outputs.codex_impl }}\",\"large_profile\":\"${{ steps.dev.outputs.large_profile }}\"}}"
 
       # ============================================================
       # PHASE 1: PLAN (Claude writes a plan)
@@ -162,7 +163,7 @@ jobs:
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
           cat > /tmp/plan-prompt.txt << 'PROMPT_EOF'
           You are working in a GitHub repository on branch "BRANCH_PLACEHOLDER".
@@ -226,7 +227,7 @@ jobs:
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
           cat > /tmp/plan-context.txt << CONTEXT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
@@ -379,7 +380,7 @@ jobs:
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
           ISSUE_NUMBER: ${{ steps.dev.outputs.issue_number }}
         run: |
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
           MAX_REVISIONS=3
@@ -493,6 +494,36 @@ jobs:
           done
 
       # ============================================================
+      # AUTO-DETECT CODEX PROFILE (small/large based on plan)
+      # ============================================================
+
+      - name: "Detect Codex profile"
+        id: profile
+        if: steps.dev.outputs.codex_impl == 'true'
+        run: |
+          # ci:large label overrides auto-detection
+          if [ "${{ steps.dev.outputs.large_profile }}" = "true" ]; then
+            echo "profile=large" >> "$GITHUB_OUTPUT"
+            echo "Profile: large (from ci:large label)"
+            exit 0
+          fi
+
+          # Auto-detect from plan: count unique file paths mentioned
+          if [ -f /tmp/plan.md ]; then
+            # Count lines that look like file paths (contain / or end with common extensions)
+            FILE_COUNT=$(grep -cE '(\w+/\w+|\.tsx?|\.jsx?|\.css|\.json|\.md|\.sh|\.py)\b' /tmp/plan.md 2>/dev/null || echo "0")
+            echo "Detected ~$FILE_COUNT file references in plan"
+            if [ "$FILE_COUNT" -ge 6 ]; then
+              echo "profile=large" >> "$GITHUB_OUTPUT"
+              echo "Profile: large (auto-detected, $FILE_COUNT file refs)"
+              exit 0
+            fi
+          fi
+
+          echo "profile=small" >> "$GITHUB_OUTPUT"
+          echo "Profile: small (default)"
+
+      # ============================================================
       # PHASE 3: IMPLEMENT (Claude implements with plan + review)
       # ============================================================
 
@@ -517,7 +548,7 @@ jobs:
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
           PLAN=""
           if [ -f /tmp/plan.md ]; then
@@ -602,10 +633,11 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           MAX_CODEX_TURNS: "12"
           CODEX_MAX_SESSIONS: "3"
+          CODEX_PROFILE: ${{ steps.profile.outputs.profile || 'small' }}
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
           PLAN=""
           if [ -f /tmp/plan.md ]; then
@@ -791,7 +823,7 @@ jobs:
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
           ISSUE_NUM="${{ github.event.issue.number }}"
 
           REVIEW=""
@@ -836,8 +868,9 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           MAX_CODEX_TURNS: "12"
           CODEX_MAX_SESSIONS: "2"
+          CODEX_PROFILE: ${{ steps.profile.outputs.profile || 'small' }}
         run: |
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
           ISSUE_NUM="${{ github.event.issue.number }}"
 
           REVIEW=""
@@ -966,7 +999,7 @@ jobs:
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
           ISSUE_NUM="${{ github.event.issue.number }}"
           TEST_OUTPUT=$(cat /tmp/smoke-output.txt | tail -50)
 
@@ -1009,7 +1042,7 @@ jobs:
           BOT_NOTIFY_URL: ${{ secrets.BOT_WEBHOOK_URL }}
           DEV_BRANCH: ${{ steps.dev.outputs.branch }}
         run: |
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
           ISSUE_NUM="${{ github.event.issue.number }}"
           PERF_OUTPUT=$(cat /tmp/perf-output.txt | tail -60)
 
@@ -1096,7 +1129,7 @@ jobs:
         run: |
           ISSUE_NUM="${{ github.event.issue.number }}"
           ISSUE_TITLE="${{ steps.dev.outputs.issue_title }}"
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
           cat > /tmp/sonnet-prompt.txt << PROMPT_EOF
           You are working in a GitHub repository on branch "${BRANCH}".
@@ -1174,7 +1207,7 @@ jobs:
             echo "commit_sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           else
             git fetch origin
-            BRANCH=$(git branch --show-current)
+            BRANCH=$(git rev-parse --abbrev-ref HEAD)
             REMOTE_SHA=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "none")
             if [[ "$REMOTE_SHA" != "$INITIAL_SHA" ]] && [[ "$REMOTE_SHA" != "none" ]]; then
               echo "Remote has new commits"
@@ -1191,7 +1224,7 @@ jobs:
         if: always() && steps.verify.outputs.pushed == 'true'
         continue-on-error: true
         run: |
-          BRANCH=$(git branch --show-current)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
           COMMIT_SHA="${{ steps.verify.outputs.commit_sha }}"
           COMMIT_SHORT="${{ steps.verify.outputs.commit_sha_short }}"
           ISSUE_NUM="${{ steps.dev.outputs.issue_number }}"
