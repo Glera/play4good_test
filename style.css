@@ -165,13 +165,6 @@ body {
     box-shadow: 0 0 10px rgba(52, 199, 89, 0.5);
 }
 
-/* Fly-together match animation (handled by JS for arc trajectory) */
-/* Fade-out after tiles meet — applied to the entire tile (including shadow/border) before DOM removal */
-.mahjong-tile.tile-fade-out {
-    transition: opacity 0.15s ease-out;
-    opacity: 0;
-}
-
 /* Particle burst */
 .match-particle {
     position: absolute;

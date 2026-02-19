@@ -786,8 +786,8 @@ function removePair(a, b) {
 
     // End positions: tiles meet nearly touching along the A→B axis
     // Use tileW for X-component and tileH for Y-component to avoid overlap with non-square tiles
-    const endGapX = tileW * 0.1;
-    const endGapY = tileH * 0.1;
+    const endGapX = tileW * 0.35;
+    const endGapY = tileH * 0.35;
     const endAx = meetX - nx * endGapX - tileW / 2;
     const endAy = meetY - ny * endGapY - tileH / 2;
     const endBx = meetX + nx * endGapX - tileW / 2;
@@ -799,7 +799,7 @@ function removePair(a, b) {
 
     // Scatter distance: how far each tile flies outward from start
     const safeDist = Math.max(dist, tileW);
-    const scatterDist = Math.max(tileW * 2.5, safeDist * 0.7);
+    const scatterDist = Math.max(tileW * 7.5, safeDist * 2.0);
 
     // Build control points: scatter (ctrl1) then converge (ctrl2)
     let ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By;
@@ -812,7 +812,7 @@ function removePair(a, b) {
     // Clamp control points to board bounds, preserving symmetry
     // Small padding allows scatter points to extend slightly beyond board edges
     // but not far enough to cause viewport scrolling on mobile
-    const pad = tileW * 0.5;
+    const pad = tileW * 1.5;
     [ctrl1Ax, ctrl1Ay, ctrl1Bx, ctrl1By] = clampCtrlPairSymmetric(
         ctrl1Ax, ctrl1Ay, aCx - tileW / 2, aCy - tileH / 2,
         ctrl1Bx, ctrl1By, bCx - tileW / 2, bCy - tileH / 2,
@@ -824,21 +824,17 @@ function removePair(a, b) {
         boardW, boardH, pad
     );
 
-    // Duration scales with distance for smooth arc animation (capped at 500ms to stay in sync with particles)
-    const duration = Math.round(Math.min(500, Math.max(350, 300 + dist * 0.4)));
+    // Duration scales with distance for smooth arc animation
+    const duration = Math.round(Math.min(1200, Math.max(700, 500 + dist * 0.8)));
     let finished = 0;
 
     function onFinish() {
         finished++;
         if (finished === 2) {
             createParticles(meetX, meetY);
-            // Fade out tiles before removing from DOM
-            if (elA) elA.classList.add('tile-fade-out');
-            if (elB) elB.classList.add('tile-fade-out');
-            setTimeout(() => {
-                if (elA && elA.parentNode) elA.remove();
-                if (elB && elB.parentNode) elB.remove();
-            }, 150);
+            // Remove tiles from DOM immediately (no fade-out)
+            if (elA && elA.parentNode) elA.remove();
+            if (elB && elB.parentNode) elB.remove();
             applyZoom();
             checkGameState();
         }
