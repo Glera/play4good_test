@@ -643,11 +643,11 @@ function createParticles(x, y) {
 // Phase 1 (0→50%): tiles move forward + scatter outward (разлёт)
 // Phase 2 (50→100%): tiles move forward + converge inward (слетание)
 // Both phases cover equal vertical distance and equal time
-function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, duration, onContact) {
+function animateArc(el, startX, startY, endX, endY, amplitude, perpX, perpY, duration, onContact, tContact) {
     const startTime = performance.now();
     el.classList.add('flying');
     let contactFired = false;
-    const tContact = 0.98;
+    if (tContact === undefined) tContact = 0.93;
 
     function step(now) {
         const t = Math.min((now - startTime) / duration, 1);
@@ -755,7 +755,7 @@ function removePair(a, b) {
     // regardless of whether they're horizontal, vertical, or diagonal
     // Left tile stays left, right tile stays right (no crossing)
     const aIsLeft = aCx < bCx || (aCx === bCx && aCy < bCy);
-    const sideGap = Math.min(tileW * 0.15, dist * 0.4);
+    const sideGap = Math.min(tileW * 0.45, dist * 0.4);
     const endAx = meetX + (aIsLeft ? -sideGap : sideGap) - tileW / 2;
     const endAy = meetY - tileH / 2;
     const endBx = meetX + (aIsLeft ? sideGap : -sideGap) - tileW / 2;
@@ -783,11 +783,18 @@ function removePair(a, b) {
     const boost = 1 + closeness * 1.5;
     const amplitude = Math.min(baseAmplitude * boost, maxAmplitude);
 
+    // Compute tContact from geometry: remove tiles when their edges would just touch
+    // endGap = edge-to-edge gap at endpoint; negative means overlap
+    // If no overlap → fire late (0.98); if overlap → fire earlier proportionally
+    const endScale = 1 - 0.08; // scale at t=1 from animateArc: 1 - 0.08*t*t
+    const endGap = 2 * sideGap - tileW * endScale;
+    const tContact = endGap >= 0 ? 0.98 : Math.max(0.90, 0.98 + endGap / tileW);
+
     // Duration scales with distance for smooth arc animation
     const duration = Math.round(Math.min(900, Math.max(520, 380 + dist * 0.7)));
     let contactCount = 0;
 
-    // onContact fires at ~98% progress for each tile (near-contact removal)
+    // onContact fires near contact point for each tile (near-contact removal)
     // Both must fire before actual removal — shared counter guards synchronicity
     function onContact() {
         contactCount++;
@@ -819,8 +826,8 @@ function removePair(a, b) {
 
     // Scatter is ALWAYS HORIZONTAL (perpY=0) — Y is purely linear → 50% at midpoint guaranteed
     // Tile A scatters to its side, tile B to the opposite side
-    animateArc(elA, ax, ay, endAx, endAy, amplitude, scatterDirA, 0, duration, onContact);
-    animateArc(elB, bx, by, endBx, endBy, amplitude, scatterDirB, 0, duration, onContact);
+    animateArc(elA, ax, ay, endAx, endAy, amplitude, scatterDirA, 0, duration, onContact, tContact);
+    animateArc(elB, bx, by, endBx, endBy, amplitude, scatterDirB, 0, duration, onContact, tContact);
 }
 
 // Update UI counters
