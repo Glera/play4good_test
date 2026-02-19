@@ -10,11 +10,15 @@
 #   MAX_CODEX_TURNS      — max turns per session (default: 12)
 #   CODEX_MAX_SESSIONS   — max session restarts via checkpoint (default: 3)
 #   REPO_CACHE_KEY       — prompt cache key (default: repo:$GITHUB_REPOSITORY:agent:v1)
+#   CODEX_PROFILE        — small|large (default: small)
+#                          small: max_tool_calls=3, fail-fast turn 3
+#                          large: max_tool_calls=6, fail-fast turn 5
 #
 # Token optimization:
 #   - reasoning.effort: low by default, auto-escalates to medium on build failure
 #   - max_output_tokens: 1400 (tight), auto-reduced if reasoning ratio too high
-#   - max_tool_calls: 6 (plan) / 3 (implement), parallel_tool_calls: false
+#   - max_tool_calls: 6 (plan) / profile-dependent (implement)
+#   - parallel_tool_calls: false (plan) / true (implement)
 #   - truncation: auto (safety net for long conversations)
 #   - prompt caching: 24h retention for stable system+tools prefix
 #   - Session splitting: 12 turns max, then checkpoint-summary + new session
@@ -30,6 +34,7 @@ MODEL="${CODEX_MODEL:-gpt-5.2-codex}"
 REASONING_EFFORT="${CODEX_REASONING:-low}"
 MAX_OUTPUT="${CODEX_MAX_OUTPUT:-1400}"
 CACHE_KEY="${REPO_CACHE_KEY:-repo:${GITHUB_REPOSITORY:-local}:agent:v1}"
+PROFILE="${CODEX_PROFILE:-small}"
 
 if [ -z "${OPENAI_API_KEY:-}" ]; then
   echo "Error: OPENAI_API_KEY not set" >&2
@@ -58,7 +63,7 @@ ESCALATED="false"
 # Fail-fast: track whether agent has written code (implement mode only)
 HAS_WRITTEN="false"
 
-echo "Config: model=$MODEL reasoning=$REASONING_EFFORT max_output=$MAX_OUTPUT turns/session=$SESSION_TURNS sessions=$MAX_SESSIONS cache=$CACHE_KEY" >&2
+echo "Config: model=$MODEL reasoning=$REASONING_EFFORT max_output=$MAX_OUTPUT turns/session=$SESSION_TURNS sessions=$MAX_SESSIONS cache=$CACHE_KEY profile=$PROFILE" >&2
 
 # --- Agent rules (appended to system prompt — stable prefix for caching) ---
 AGENT_RULES="
@@ -104,16 +109,25 @@ WORKFLOW:
 
 RULES:
 - DO NOT re-explore — the plan has already been reviewed and approved
-- Your FIRST write_file or run_command (with sed/patch) should happen by turn 3 at the latest
+- Your FIRST write_file or run_command (with sed/patch) should happen by turn $FAIL_FAST_TURN at the latest
 - Make clean, focused changes matching the plan
 - Follow project conventions from CLAUDE.md
 - After pushing, call done() and STOP
 - Do not loop or retry after a successful push"
 fi
 
+# --- Profile-dependent settings (implement mode only) ---
+if [ "$PROFILE" = "large" ]; then
+  IMPL_MAX_TOOL_CALLS=6
+  FAIL_FAST_TURN=5
+else
+  IMPL_MAX_TOOL_CALLS=3
+  FAIL_FAST_TURN=3
+fi
+
 # --- Tools definition (mode-dependent) ---
 # Plan mode: all 5 tools, max_tool_calls 6 (exploration needed)
-# Implement mode: 4 tools (no list_files), max_tool_calls 3 (focused writing)
+# Implement mode: 4 tools (no list_files), max_tool_calls profile-dependent
 TOOLS_COMMON='[
   {"type":"function","name":"read_file","description":"Read contents of a file. Returns up to 15KB. For large files, use run_command with head/tail/sed to read specific sections.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path relative to repo root"}},"required":["path"]}},
   {"type":"function","name":"write_file","description":"Write or overwrite a file with the given content. Creates parent directories if needed.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path relative to repo root"},"content":{"type":"string","description":"Full file content"}},"required":["path","content"]}},
@@ -127,10 +141,13 @@ if [ "$MODE" = "plan" ]; then
   # Plan: all tools + list_files, 6 calls/turn
   TOOLS=$(echo "$TOOLS_COMMON" | jq --argjson lf "$TOOL_LIST_FILES" '. + [$lf]')
   MAX_TOOL_CALLS=6
+  PARALLEL_TOOL_CALLS=false
 else
-  # Implement: no list_files (plan already identified files), 3 calls/turn
+  # Implement: no list_files (plan already identified files), profile-dependent calls/turn,
+  # parallel enabled so CLAUDE.md + target file can be read in one turn.
   TOOLS="$TOOLS_COMMON"
-  MAX_TOOL_CALLS=3
+  MAX_TOOL_CALLS=$IMPL_MAX_TOOL_CALLS
+  PARALLEL_TOOL_CALLS=true
 fi
 
 # --- Execute a tool call ---
@@ -268,6 +285,7 @@ build_request() {
     --arg effort "$REASONING_EFFORT"
     --argjson max_out "$MAX_OUTPUT"
     --argjson max_tc "$MAX_TOOL_CALLS"
+    --argjson parallel "$PARALLEL_TOOL_CALLS"
     --arg cache_key "$CACHE_KEY"
   )
 
@@ -276,7 +294,7 @@ build_request() {
       '{model: $model, input: $input, tools: $tools, store: true,
         max_output_tokens: $max_out,
         max_tool_calls: $max_tc,
-        parallel_tool_calls: false,
+        parallel_tool_calls: $parallel,
         truncation: "auto",
         reasoning: {effort: $effort},
         prompt_cache_key: $cache_key,
@@ -287,7 +305,7 @@ build_request() {
         previous_response_id: $prev_id,
         max_output_tokens: $max_out,
         max_tool_calls: $max_tc,
-        parallel_tool_calls: false,
+        parallel_tool_calls: $parallel,
         truncation: "auto",
         reasoning: {effort: $effort},
         prompt_cache_key: $cache_key,
@@ -418,6 +436,8 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
     # Process output items
     HAS_FUNCTION_CALLS=false
     TOOL_OUTPUTS="[]"
+    DONE_CALLED=false
+    DONE_SUMMARY=""
 
     for i in $(seq 0 $((NUM_ITEMS - 1))); do
       ITEM_TYPE=$(echo "$OUTPUT" | jq -r ".[$i].type")
@@ -433,12 +453,12 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
 
         RESULT=$(execute_tool "$FUNC_NAME" "$ARGS")
 
-        # Handle "done" tool — print summary, log totals, exit
+        # If done() appears together with other tool calls (parallel mode),
+        # process all tools first, then exit once the loop finishes.
         if [ "$FUNC_NAME" = "done" ]; then
-          echo "$RESULT"
-          echo "--- Agent completed (turn $GLOBAL_TURN) ---" >&2
-          echo "Total usage: input=${TOTAL_INPUT} (cached=${TOTAL_CACHED}) output=${TOTAL_OUTPUT} (reasoning=${TOTAL_REASONING})" >&2
-          exit 0
+          DONE_CALLED=true
+          DONE_SUMMARY="$RESULT"
+          continue
         fi
 
         TOOL_OUTPUTS=$(echo "$TOOL_OUTPUTS" | jq \
@@ -454,6 +474,13 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
       fi
     done
 
+    if [ "$DONE_CALLED" = "true" ]; then
+      echo "$DONE_SUMMARY"
+      echo "--- Agent completed (turn $GLOBAL_TURN) ---" >&2
+      echo "Total usage: input=${TOTAL_INPUT} (cached=${TOTAL_CACHED}) output=${TOTAL_OUTPUT} (reasoning=${TOTAL_REASONING})" >&2
+      exit 0
+    fi
+
     if [ "$HAS_FUNCTION_CALLS" = "false" ]; then
       FINAL_TEXT=$(echo "$OUTPUT" | jq -r '[.[] | select(.type == "message") | .content[]? | select(.type == "output_text") | .text] | join("\n")' 2>/dev/null || echo "Agent completed")
       echo "$FINAL_TEXT"
@@ -461,10 +488,11 @@ while [ $SESSION -lt "$MAX_SESSIONS" ]; do
       break
     fi
 
-    # Fail-fast: in implement mode, if turn 3 completed with no writes → abort
-    if [ "$MODE" = "implement" ] && [ "$TURN" -ge 3 ] && [ "$HAS_WRITTEN" = "false" ]; then
-      echo "  [fail-fast] Turn $TURN with no write_file/patch — aborting (implement mode)" >&2
-      echo "Agent aborted: spent $TURN turns reading without writing code" >&2
+    # Fail-fast: in implement mode, if turn N completed with no writes → abort
+    # Threshold depends on profile: small=3, large=5
+    if [ "$MODE" = "implement" ] && [ "$TURN" -ge "$FAIL_FAST_TURN" ] && [ "$HAS_WRITTEN" = "false" ]; then
+      echo "  [fail-fast] Turn $TURN/$FAIL_FAST_TURN with no write_file/patch — aborting (profile=$PROFILE)" >&2
+      echo "Agent aborted: spent $TURN turns reading without writing code (profile=$PROFILE)" >&2
       COMPLETED=true
       break
     fi
