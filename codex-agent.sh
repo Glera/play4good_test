@@ -140,6 +140,8 @@ INITIAL_INPUT=$(jq -n \
     {"role": "user", "content": $context}
   ]')
 
+PREV_RESPONSE_ID=""
+
 # --- Execute a tool call ---
 execute_tool() {
   local func_name="$1"
@@ -215,24 +217,42 @@ while [ $TURN -lt "$MAX_TURNS" ]; do
   TURN=$((TURN + 1))
   echo "--- Codex Turn $TURN/$MAX_TURNS ---" >&2
 
+  # Build API request body
+  # First turn: send full input with tools
+  # Subsequent turns: send only function_call_output items + previous_response_id
+  if [ -z "$PREV_RESPONSE_ID" ]; then
+    REQUEST_BODY=$(jq -n \
+      --argjson input "$INPUT" \
+      --argjson tools "$TOOLS" \
+      '{model: "gpt-5.2-codex", input: $input, tools: $tools, store: true}')
+  else
+    REQUEST_BODY=$(jq -n \
+      --argjson input "$INPUT" \
+      --argjson tools "$TOOLS" \
+      --arg prev_id "$PREV_RESPONSE_ID" \
+      '{model: "gpt-5.2-codex", input: $input, tools: $tools, store: true, previous_response_id: $prev_id}')
+  fi
+
   # Call Codex API (Responses endpoint)
   HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
     https://api.openai.com/v1/responses \
     -H "Authorization: Bearer $OPENAI_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "$(jq -n \
-      --argjson input "$INPUT" \
-      --argjson tools "$TOOLS" \
-      '{model: "gpt-5.2-codex", input: $input, tools: $tools}')")
+    -d "$REQUEST_BODY")
 
   HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
   BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
 
   if [ "$HTTP_CODE" != "200" ]; then
     echo "Codex API error (HTTP $HTTP_CODE)" >&2
-    echo "$BODY" | jq -r '.error.message // "Unknown error"' 2>/dev/null >&2
+    echo "$BODY" | jq -r '.error.message // "Unknown error"' >&2
+    echo "Request body (first 500 chars): $(echo "$REQUEST_BODY" | head -c 500)" >&2
     exit 1
   fi
+
+  # Save response ID for next turn (API manages conversation state)
+  PREV_RESPONSE_ID=$(echo "$BODY" | jq -r '.id')
+  echo "  Response ID: $PREV_RESPONSE_ID" >&2
 
   # Parse output items
   OUTPUT=$(echo "$BODY" | jq '.output // []')
@@ -243,9 +263,9 @@ while [ $TURN -lt "$MAX_TURNS" ]; do
     break
   fi
 
-  # Process each output item
+  # Process each output item, collect function_call_output items for next turn
   HAS_FUNCTION_CALLS=false
-  NEW_INPUT_ITEMS="[]"
+  TOOL_OUTPUTS="[]"
 
   for i in $(seq 0 $((NUM_ITEMS - 1))); do
     ITEM_TYPE=$(echo "$OUTPUT" | jq -r ".[$i].type")
@@ -268,12 +288,8 @@ while [ $TURN -lt "$MAX_TURNS" ]; do
         exit 0
       fi
 
-      # Add the function_call item itself (echo back to the model)
-      ITEM=$(echo "$OUTPUT" | jq ".[$i]")
-      NEW_INPUT_ITEMS=$(echo "$NEW_INPUT_ITEMS" | jq --argjson item "$ITEM" '. + [$item]')
-
-      # Add the tool result
-      NEW_INPUT_ITEMS=$(echo "$NEW_INPUT_ITEMS" | jq \
+      # Add function_call_output for next turn
+      TOOL_OUTPUTS=$(echo "$TOOL_OUTPUTS" | jq \
         --arg id "$CALL_ID" \
         --arg output "$RESULT" \
         '. + [{"type": "function_call_output", "call_id": $id, "output": $output}]')
@@ -284,9 +300,6 @@ while [ $TURN -lt "$MAX_TURNS" ]; do
       if [ -n "$TEXT" ]; then
         echo "  Codex: $TEXT" >&2
       fi
-      # Add message item to input for context continuity
-      ITEM=$(echo "$OUTPUT" | jq ".[$i]")
-      NEW_INPUT_ITEMS=$(echo "$NEW_INPUT_ITEMS" | jq --argjson item "$ITEM" '. + [$item]')
     fi
   done
 
@@ -297,8 +310,8 @@ while [ $TURN -lt "$MAX_TURNS" ]; do
     break
   fi
 
-  # Append new items to input for next turn
-  INPUT=$(echo "$INPUT" | jq --argjson items "$NEW_INPUT_ITEMS" '. + $items')
+  # Next turn: only send tool outputs (previous_response_id handles context)
+  INPUT="$TOOL_OUTPUTS"
 done
 
 echo "Codex agent completed after $TURN turns" >&2
